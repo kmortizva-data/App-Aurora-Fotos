@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aurora Fotos</string>
+    <string name="main_subtitle">Elige qué vas a fotografiar, pon el teléfono en el trípode y pulsa Iniciar.</string>
+    <string name="btn_start">Iniciar</string>
+    <string name="btn_stop">Detener</string>
+    <string name="btn_settings">Ajustes del preset</string>
+    <string name="btn_diagnostics">Diagnóstico de cámara</string>
+    <string name="btn_frame">Encuadrar y empezar</string>
+    <string name="btn_test_dng">Capturar DNG de prueba</string>
+    <string name="btn_copy">Copiar</string>
+    <string name="btn_share">Compartir</string>
+    <string name="btn_save">Guardar</string>
+    <string name="btn_reset">Restablecer</string>
+    <string name="status_idle">Listo</string>
+    <string name="status_countdown">Empezando en %1$d s… no toques el teléfono</string>
+    <string name="status_running">Capturando: toma %1$d / %2$s · frame %3$d</string>
+    <string name="status_processing">Procesando (apilando / codificando video)…</string>
+    <string name="status_done">Listo. Guardado en DCIM/AuroraFotos/%1$s</string>
+    <string name="status_error">Error: %1$s</string>
+    <string name="notif_channel_name">Captura en curso</string>
+    <string name="notif_title">Aurora Fotos capturando</string>
+    <string name="notif_stop">Detener</string>
+    <string name="perm_needed">Se necesitan los permisos de cámara y notificaciones.</string>
+    <string name="diag_title">Diagnóstico de cámara</string>
+    <string name="diag_hint">Esto muestra lo que Samsung expone a apps de terceros (rango de exposición, ISO, RAW). Captura un DNG de prueba y ábrelo en Lightroom para confirmar que no sale corrupto.</string>
+    <string name="settings_title">Ajustes: %1$s</string>
+    <string name="preview_hint">Encuadra y revisa el enfoque. La vista previa está forzada a exposición larga para que veas las estrellas.</string>
+    <string name="lens_label">Lente (ID de cámara)</string>
+</resources>
