@@ -145,7 +145,7 @@ class CaptureEngine(private val context: Context) {
                                 }
                                 val b = rollingBmp ?: BitmapStacker(jw, jh, StackMode.LIGHTEN).also { rollingBmp = it }
                                 b.addJpeg(jpeg)
-                                if (preset.saveJpeg || preset.makeVideo) {
+                                if (preset.makeVideo) {
                                     val bm = b.result()
                                     val uri = saver.saveJpeg("${sessionName}_trail_${Fmt.frameIndex(frameCounter)}.jpg", compress(bm))
                                     bm.recycle()
@@ -163,7 +163,7 @@ class CaptureEngine(private val context: Context) {
                             else -> {
                                 val base = "${sessionName}_${Fmt.frameIndex(frameCounter)}"
                                 if (wantRaw && frame.raw != null) {
-                                    saver.saveDng("$base.dng") { out ->
+                                    saveDngSafely(saver, log, "$base.dng") { out ->
                                         DngWriter.write(out, info.characteristics, frame.result, frame.raw, exifOrientation(jpegOrientation), "Aurora Fotos ${preset.name}")
                                     }
                                 }
@@ -180,7 +180,7 @@ class CaptureEngine(private val context: Context) {
                     val rs = rawStack
                     val lr = lastResult
                     if (rs != null && lr != null && rs.frames > 0) {
-                        saver.saveDng("$base.dng") { out ->
+                        saveDngSafely(saver, log, "$base.dng") { out ->
                             DngWriter.write(out, info.characteristics, lr, rs.result(), rs.width, rs.height, exifOrientation(jpegOrientation), "Aurora Fotos ${preset.name} · ${rs.frames}×${Fmt.exposure(exposureNs)} ${preset.stackMode}")
                         }
                     }
@@ -200,7 +200,7 @@ class CaptureEngine(private val context: Context) {
                 val lr = lastResult
                 val rr = rollingRaw
                 if (rr != null && lr != null && rr.frames > 0 && wantRaw) {
-                    saver.saveDng("${sessionName}_startrails.dng") { out ->
+                    saveDngSafely(saver, log, "${sessionName}_startrails.dng") { out ->
                         DngWriter.write(out, info.characteristics, lr, rr.result(), rr.width, rr.height, exifOrientation(jpegOrientation), "Aurora Fotos star trails · ${rr.frames} frames")
                     }
                 }
@@ -217,8 +217,8 @@ class CaptureEngine(private val context: Context) {
             if (preset.makeVideo && jpegUris.size >= 2) {
                 makeVideo(saver, sessionName, preset.videoFps, jpegUris)
             }
-            if (!preset.saveJpeg && preset.makeVideo) {
-                // JPEGs were only kept to build the video.
+            if ((!preset.saveJpeg || rolling) && preset.makeVideo) {
+                // Intermediate JPEGs were only kept to build the video.
                 jpegUris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
             }
             log.appendLine("Frames capturados: $frameCounter, tomas: $shot, duración ${Fmt.seconds(SystemClock.elapsedRealtime() - startedAt)}")
@@ -254,6 +254,17 @@ class CaptureEngine(private val context: Context) {
             ok = true
         } finally {
             saver.finishVideo(uri, ok)
+        }
+    }
+
+    /** DngCreator is picky on some Samsung firmwares; a failed DNG is logged, not fatal. */
+    private fun saveDngSafely(saver: MediaSaver, log: StringBuilder, name: String, writer: (java.io.OutputStream) -> Unit) {
+        try {
+            saver.saveDng(name, writer)
+        } catch (t: Throwable) {
+            Log.e(tag, "DNG $name failed", t)
+            log.appendLine("AVISO: no se pudo escribir $name: $t")
+            update { it.copy(message = "DNG falló: ${t.message ?: t.javaClass.simpleName}") }
         }
     }
 

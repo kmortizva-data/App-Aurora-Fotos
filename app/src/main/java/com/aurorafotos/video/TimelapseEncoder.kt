@@ -87,7 +87,7 @@ class TimelapseEncoder(
                 val bm = frameAt(i) ?: continue
                 try {
                     val src = centreCrop(bm.width, bm.height, width, height).toRect()
-                    val canvas: Canvas = surface.lockHardwareCanvas()
+                    val canvas: Canvas = runCatching { surface.lockHardwareCanvas() }.getOrElse { surface.lockCanvas(null) }
                     try {
                         canvas.drawColor(0xFF000000.toInt())
                         canvas.drawBitmap(bm, src, dst, paint)
