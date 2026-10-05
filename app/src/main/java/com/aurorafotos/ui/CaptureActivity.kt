@@ -145,7 +145,9 @@ class CaptureActivity : Activity() {
                     )
                 )
                 val exp = if (preset.exposureNs == Preset.MAX_EXPOSURE) info.maxExposureNs else info.clampExposure(preset.exposureNs)
-                status.text = "Exposición real por frame: ${Fmt.exposure(exp)} (máx. del dispositivo ${Fmt.exposure(info.maxExposureNs)}) · ISO ${info.clampIso(preset.iso)}"
+                val frames = preset.effectiveFrames(exp)
+                status.text = "Exposición real por frame: ${Fmt.exposure(exp)} (máx. del dispositivo ${Fmt.exposure(info.maxExposureNs)}) · ISO ${info.clampIso(preset.iso)}\n" +
+                    "Cada toma: $frames frames ≈ ${Fmt.exposure(frames * exp)} de exposición"
             } catch (t: Throwable) {
                 Log.e(tag, "preview failed", t)
                 status.text = getString(R.string.status_error, t.message)
@@ -207,7 +209,7 @@ class CaptureActivity : Activity() {
             }
             SessionState.DONE -> {
                 bigStatus.text = "✓"
-                status.text = getString(R.string.status_done, p.sessionName)
+                status.text = getString(R.string.status_done, p.sessionName, p.message)
                 finishSession()
             }
             SessionState.ERROR -> {
@@ -229,7 +231,8 @@ class CaptureActivity : Activity() {
 
     private fun paramsLine(p: Preset): String {
         val exp = if (p.exposureNs == Preset.MAX_EXPOSURE) "exp. máx" else Fmt.exposure(p.exposureNs)
-        return "ISO ${p.iso} · $exp × ${p.framesPerShot} · ${p.stackMode.name.lowercase()} · cámara ${p.cameraId} · foco ${p.focusDiopters} dpt"
+        val frames = if (p.totalExposureNs > 0) "hasta ${Fmt.exposure(p.totalExposureNs)}" else "× ${p.framesPerShot}"
+        return "ISO ${p.iso} · $exp $frames · ${p.stackMode.name.lowercase()} · cámara ${p.cameraId} · foco ${p.focusDiopters} dpt"
     }
 
     companion object {

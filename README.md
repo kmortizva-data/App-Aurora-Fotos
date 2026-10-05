@@ -8,11 +8,11 @@ Presets incluidos:
 
 | Preset | Qué hace | Salida |
 |---|---|---|
-| Aurora · foto | 4 × 3 s ISO 1600 apiladas (promedio) | DNG + JPEG |
+| Aurora · foto | tomas de 3 s ISO 1600 hasta 12 s totales, apiladas (promedio) | DNG + JPEG |
 | Aurora · timelapse | 1 toma de 2 s cada 3 s durante 30 min | JPEG por frame + MP4 4K 24 fps |
-| Exposición larga | 8 × exposición máxima sumadas (≈ 31 s) | DNG + JPEG |
-| Exposición larga · timelapse | 4 × máx cada 15 s durante 30 min | JPEG + MP4 |
-| Vía Láctea / estrellas | 16 × máx ISO 3200 promediadas | DNG + JPEG |
+| Exposición larga | tomas a exposición máxima sumadas hasta 30 s totales | DNG + JPEG |
+| Exposición larga · timelapse | 15 s equivalentes cada 20 s durante 30 min | JPEG + MP4 |
+| Vía Láctea / estrellas | tomas a máx ISO 3200 hasta 60 s totales, promediadas | DNG + JPEG |
 | Star trails | continuo 60 min, fusión "aclarar" | DNG + JPEG finales + MP4 con la estela creciendo |
 
 Todo es editable en **Ajustes del preset** (ISO, exposición, frames, modo de apilado, intervalo,
@@ -23,7 +23,9 @@ junto con un `_info.txt` con los parámetros reales aplicados.
 
 Samsung solo deja a las apps de terceros usar exposiciones de hasta **~3.9 s** por Camera2
 (Expert RAW y el modo Pro de Samsung tienen acceso privilegiado y llegan a 30 s). Por eso la app
-captura ráfagas de tomas cortas y las fusiona en el propio teléfono, en el dominio RAW (Bayer, 16 bit):
+captura ráfagas de tomas cortas y las fusiona en el propio teléfono, en el dominio RAW (Bayer, 16 bit).
+Cada preset define una **exposición total objetivo** (p. ej. 30 s) y la app calcula en el momento cuántos
+frames hacen falta con el máximo real del teléfono (30 s ÷ 3.9 s = 8 frames; 30 s ÷ 0.5 s = 60 frames):
 
 - **AVERAGE**: promedio → menos ruido, mismo brillo (auroras, Vía Láctea).
 - **ADD**: suma de la señal sobre el nivel de negro, recortada al nivel de blanco → brillo de una exposición N veces más larga.

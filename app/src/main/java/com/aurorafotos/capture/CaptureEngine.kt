@@ -71,6 +71,7 @@ class CaptureEngine(private val context: Context) {
         val wantRaw = preset.saveRaw && info.hasRaw
         val exposureNs = if (preset.exposureNs == Preset.MAX_EXPOSURE) info.maxExposureNs else info.clampExposure(preset.exposureNs)
         val iso = info.clampIso(preset.iso)
+        val framesPerShot = preset.effectiveFrames(exposureNs)
         val jpegOrientation = jpegOrientation(info, deviceRotation)
         val params = ExposureParams(
             iso = iso, exposureNs = exposureNs, focusDiopters = preset.focusDiopters,
@@ -82,7 +83,7 @@ class CaptureEngine(private val context: Context) {
         log.appendLine("Preset: ${preset.name} [${preset.id}]")
         log.appendLine("Cámara: ${preset.cameraId}  RAW: $wantRaw (${controller.rawSize})  JPEG: ${controller.jpegSize}")
         log.appendLine("ISO pedido ${preset.iso} → aplicado $iso; exposición pedida ${Fmt.exposure(preset.exposureNs)} → aplicada ${Fmt.exposure(exposureNs)} (máx. dispositivo ${Fmt.exposure(info.maxExposureNs)})")
-        log.appendLine("Frames/toma ${preset.framesPerShot}, apilado ${preset.stackMode}, intervalo ${preset.intervalMs} ms, duración ${preset.durationMs} ms, tomas ${preset.totalShots}")
+        log.appendLine("Frames/toma $framesPerShot (preset: ${preset.framesPerShot}, objetivo ${Fmt.exposure(preset.totalExposureNs)} total → ${Fmt.exposure(framesPerShot * exposureNs)}), apilado ${preset.stackMode}, intervalo ${preset.intervalMs} ms, duración ${preset.durationMs} ms, tomas ${preset.totalShots}")
         log.appendLine("Enfoque ${preset.focusDiopters} dioptrías, WB ${preset.wbKelvin} K, orientación JPEG $jpegOrientation")
 
         try {
@@ -95,7 +96,7 @@ class CaptureEngine(private val context: Context) {
 
             controller.open()
             controller.configure(null, wantRaw = wantRaw, wantJpeg = true, rawBuffers = 3)
-            update { it.copy(state = SessionState.CAPTURING, exposureNs = exposureNs, iso = iso, framesPerShot = preset.framesPerShot, totalShots = preset.totalShots) }
+            update { it.copy(state = SessionState.CAPTURING, exposureNs = exposureNs, iso = iso, framesPerShot = framesPerShot, totalShots = preset.totalShots) }
 
             val sessionStart = SystemClock.elapsedRealtime()
             var shot = 0
@@ -128,7 +129,7 @@ class CaptureEngine(private val context: Context) {
                 val rawStack: RawStacker? = if (perShotStack && wantRaw) RawStacker(controller.rawSize.width, controller.rawSize.height, preset.stackMode, info.blackLevel, info.whiteLevel) else null
                 var bmpStack: BitmapStacker? = null
 
-                controller.captureBurst(params, preset.framesPerShot, wantRaw = wantRaw, wantJpeg = true) { fi, frame ->
+                controller.captureBurst(params, framesPerShot, wantRaw = wantRaw, wantJpeg = true) { fi, frame ->
                     try {
                         frameCounter++
                         lastResult = frame.result
@@ -221,9 +222,10 @@ class CaptureEngine(private val context: Context) {
                 // Intermediate JPEGs were only kept to build the video.
                 jpegUris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
             }
-            log.appendLine("Frames capturados: $frameCounter, tomas: $shot, duración ${Fmt.seconds(SystemClock.elapsedRealtime() - startedAt)}")
+            val summary = "$frameCounter frames × ${Fmt.exposure(exposureNs)} = ${Fmt.exposure(frameCounter * exposureNs)} de exposición, ISO $iso, ${Fmt.seconds(SystemClock.elapsedRealtime() - startedAt)} en total"
+            log.appendLine("Resumen: $summary (tomas: $shot)")
             runCatching { saver.saveText("${sessionName}_info.txt", log.toString()) }
-            update { it.copy(state = SessionState.DONE, elapsedMs = SystemClock.elapsedRealtime() - startedAt, message = saver.relativePath) }
+            update { it.copy(state = SessionState.DONE, elapsedMs = SystemClock.elapsedRealtime() - startedAt, message = summary) }
         } catch (e: StopException) {
             update { it.copy(state = SessionState.DONE, message = saver.relativePath) }
         } catch (t: Throwable) {

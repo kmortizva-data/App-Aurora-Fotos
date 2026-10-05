@@ -26,6 +26,7 @@ class SettingsActivity : Activity() {
     private lateinit var iso: EditText
     private lateinit var exposure: EditText
     private lateinit var frames: EditText
+    private lateinit var totalExposure: EditText
     private lateinit var stack: Spinner
     private lateinit var interval: EditText
     private lateinit var duration: EditText
@@ -80,7 +81,9 @@ class SettingsActivity : Activity() {
         iso = field("ISO", p.iso.toString(), help = "El S24 Ultra suele exponer 50–3200 a terceros; se recorta al rango real.")
         exposure = field("Exposición por frame (s)", if (p.exposureNs == Preset.MAX_EXPOSURE) "max" else fmt(p.exposureNs / 1e9), numeric = false,
             help = "Escribe \"max\" para usar la máxima que permite el dispositivo (~3.9 s en S24 Ultra).")
-        frames = field("Frames por toma", p.framesPerShot.toString(), help = "Se apilan según el modo de abajo (1–${com.aurorafotos.stacking.BitmapStacker.MAX_FRAMES}).")
+        totalExposure = field("Exposición total objetivo por toma (s)", fmt(p.totalExposureNs / 1e9),
+            help = "Si es > 0, la app calcula cuántos frames hacen falta con la exposición real del teléfono (p. ej. 30 s ÷ 3.9 s = 8 frames). 0 = usar el número fijo de abajo.")
+        frames = field("Frames por toma (si el objetivo es 0)", p.framesPerShot.toString(), help = "Se apilan según el modo de abajo (1–${Preset.MAX_FRAMES}).")
         form.addView(Ui.label(this, "Apilado", size = 13f, bold = true).apply { setPadding(0, Ui.dp(this@SettingsActivity, 12), 0, 0) })
         form.addView(Ui.label(this, "NONE: guarda cada frame · AVERAGE: promedio (menos ruido) · ADD: suma (más brillo, simula obturación larga) · LIGHTEN: máximo acumulado en toda la sesión (star trails)", dim = true, size = 12f))
         stack = Spinner(this).apply {
@@ -120,7 +123,8 @@ class SettingsActivity : Activity() {
             val np = preset.copy(
                 iso = iso.text.toString().toInt().coerceIn(1, 100_000),
                 exposureNs = expNs,
-                framesPerShot = frames.text.toString().toInt().coerceIn(1, com.aurorafotos.stacking.BitmapStacker.MAX_FRAMES),
+                framesPerShot = frames.text.toString().toInt().coerceIn(1, Preset.MAX_FRAMES),
+                totalExposureNs = (totalExposure.text.toString().replace(',', '.').toDouble() * 1e9).toLong().coerceAtLeast(0),
                 stackMode = StackMode.values()[stack.selectedItemPosition],
                 intervalMs = (interval.text.toString().replace(',', '.').toDouble() * 1000).toLong().coerceAtLeast(0),
                 durationMs = (duration.text.toString().replace(',', '.').toDouble() * 60000).toLong().coerceAtLeast(0),

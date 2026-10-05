@@ -16,7 +16,7 @@
     <string name="status_countdown">Empezando en %1$d s… no toques el teléfono</string>
     <string name="status_running">Capturando: toma %1$d / %2$s · frame %3$d</string>
     <string name="status_processing">Procesando (apilando / codificando video)…</string>
-    <string name="status_done">Listo. Guardado en DCIM/AuroraFotos/%1$s</string>
+    <string name="status_done">Listo. Guardado en DCIM/AuroraFotos/%1$s\n%2$s</string>
     <string name="status_error">Error: %1$s</string>
     <string name="notif_channel_name">Captura en curso</string>
     <string name="notif_title">Aurora Fotos capturando</string>

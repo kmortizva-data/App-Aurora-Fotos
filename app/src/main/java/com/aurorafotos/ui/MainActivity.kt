@@ -44,7 +44,7 @@ class MainActivity : Activity() {
                         SessionState.COUNTDOWN -> getString(R.string.status_countdown, p.countdown)
                         SessionState.CAPTURING -> getString(R.string.status_running, p.shot, if (p.totalShots > 0) p.totalShots.toString() else "∞", p.frame) + " · " + Fmt.seconds(p.elapsedMs)
                         SessionState.PROCESSING -> getString(R.string.status_processing) + " " + p.message
-                        SessionState.DONE -> getString(R.string.status_done, p.sessionName)
+                        SessionState.DONE -> getString(R.string.status_done, p.sessionName, p.message)
                         SessionState.ERROR -> getString(R.string.status_error, p.error ?: "?")
                         else -> ""
                     }
@@ -160,7 +160,8 @@ class MainActivity : Activity() {
 
     private fun summary(p: Preset): String {
         val exp = if (p.exposureNs == Preset.MAX_EXPOSURE) "exp. máx" else Fmt.exposure(p.exposureNs)
-        val b = StringBuilder("ISO ${p.iso} · $exp · ${p.framesPerShot} frame(s)/toma")
+        val frames = if (p.totalExposureNs > 0) "≈${Fmt.exposure(p.totalExposureNs)} totales por toma" else "${p.framesPerShot} frame(s)/toma"
+        val b = StringBuilder("ISO ${p.iso} · $exp · $frames")
         if (p.stackMode.name != "NONE") b.append(" · ${p.stackMode.name.lowercase()}")
         if (p.intervalMs > 0) b.append(" · cada ${Fmt.seconds(p.intervalMs)}")
         if (p.totalShots > 0) b.append(" · ${p.totalShots} toma(s)")

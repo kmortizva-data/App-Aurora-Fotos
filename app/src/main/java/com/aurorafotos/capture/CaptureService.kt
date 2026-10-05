@@ -94,7 +94,7 @@ class CaptureService : Service() {
         SessionState.CAPTURING -> getString(R.string.status_running, p.shot, if (p.totalShots > 0) p.totalShots.toString() else "∞", p.frame) +
             " · " + Fmt.exposure(p.exposureNs) + " ISO " + p.iso + " · " + Fmt.seconds(p.elapsedMs)
         SessionState.PROCESSING -> getString(R.string.status_processing) + (if (p.message.isNotEmpty()) " " + p.message else "")
-        SessionState.DONE -> getString(R.string.status_done, p.sessionName)
+        SessionState.DONE -> getString(R.string.status_done, p.sessionName, p.message)
         SessionState.ERROR -> getString(R.string.status_error, p.error ?: "?")
     }
 
