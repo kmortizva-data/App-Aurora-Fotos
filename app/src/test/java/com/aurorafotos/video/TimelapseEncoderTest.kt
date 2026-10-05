@@ -21,7 +21,9 @@ class TimelapseEncoderTest {
 
     @Test
     fun picks4kOnlyWhenSourceIsWideEnough() {
-        assertEquals(3840 to 2160, TimelapseEncoder.outputSizeFor(4000))
-        assertEquals(1920 to 1080, TimelapseEncoder.outputSizeFor(3000))
+        assertEquals(3840 to 2160, TimelapseEncoder.outputSizeFor(4000, 3000))
+        assertEquals(1920 to 1080, TimelapseEncoder.outputSizeFor(3000, 2250))
+        assertEquals(2160 to 3840, TimelapseEncoder.outputSizeFor(3000, 4000))
+        assertEquals(1080 to 1920, TimelapseEncoder.outputSizeFor(1500, 2000))
     }
 }

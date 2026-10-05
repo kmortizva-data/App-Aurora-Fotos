@@ -42,6 +42,13 @@ data class Preset(
     /** Camera2 id. "0" is the main wide camera on Galaxy phones. */
     val cameraId: String,
     val countdownSec: Int,
+    /**
+     * Request [exposureNs] even if it is above what the device declares for third-party apps.
+     * Samsung's HAL sometimes honours it; the real value is read back and used for the maths.
+     */
+    val forceExposure: Boolean = false,
+    /** Render video frames at half resolution (4× faster; 1080p output). */
+    val videoHalfRes: Boolean = false,
 ) {
     val isTimelapse: Boolean get() = intervalMs > 0 || totalShots != 1
 
@@ -62,13 +69,14 @@ data class Preset(
         kv("totalShots", totalShots); kv("saveRaw", saveRaw); kv("saveJpeg", saveJpeg)
         kv("makeVideo", makeVideo); kv("videoFps", videoFps); kv("focusDiopters", focusDiopters)
         kv("wbKelvin", wbKelvin); kv("cameraId", cameraId); kv("countdownSec", countdownSec)
+        kv("forceExposure", forceExposure); kv("videoHalfRes", videoHalfRes)
     }
 
     companion object {
         const val MAX_EXPOSURE = -1L
         const val SEC = 1_000_000_000L
-        /** Upper bound for a per-shot stack (BitmapStacker keeps 16-bit sums). */
-        const val MAX_FRAMES = 128
+        /** Upper bound for a per-shot stack (sanity limit; sums are 32-bit so this is generous). */
+        const val MAX_FRAMES = 4000
 
         fun deserialize(text: String, fallback: Preset): Preset {
             val m = HashMap<String, String>()
@@ -101,6 +109,8 @@ data class Preset(
                 wbKelvin = int("wbKelvin", fallback.wbKelvin),
                 cameraId = str("cameraId", fallback.cameraId),
                 countdownSec = int("countdownSec", fallback.countdownSec),
+                forceExposure = bool("forceExposure", fallback.forceExposure),
+                videoHalfRes = bool("videoHalfRes", fallback.videoHalfRes),
             )
         }
     }
@@ -110,8 +120,8 @@ object Presets {
     val AURORA_PHOTO = Preset(
         id = "aurora_photo",
         name = "Aurora · foto",
-        description = "Tomas de 3 s a ISO 1600 hasta sumar 12 s, apiladas (promedio) en un DNG limpio + JPEG. Ideal para auroras que se mueven.",
-        iso = 1600, exposureNs = 3 * Preset.SEC, framesPerShot = 4, totalExposureNs = 12 * Preset.SEC, stackMode = StackMode.AVERAGE,
+        description = "Suma frames a ISO 1600 hasta 8 s de exposición equivalente. DNG de 16 bits (Lightroom lo ve como una toma de 8 s) + JPEG.",
+        iso = 1600, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 72, totalExposureNs = 8 * Preset.SEC, stackMode = StackMode.ADD,
         intervalMs = 0, durationMs = 0, totalShots = 1,
         saveRaw = true, saveJpeg = true, makeVideo = false, videoFps = 24,
         focusDiopters = 0f, wbKelvin = 3800, cameraId = "0", countdownSec = 3,
@@ -120,9 +130,9 @@ object Presets {
     val AURORA_TIMELAPSE = Preset(
         id = "aurora_timelapse",
         name = "Aurora · timelapse",
-        description = "Una toma de 2 s cada 3 s durante 30 min (600 frames). Monta un MP4 4K a 24 fps y guarda los JPEG.",
-        iso = 1600, exposureNs = 2 * Preset.SEC, framesPerShot = 1, stackMode = StackMode.NONE,
-        intervalMs = 3_000, durationMs = 30 * 60_000L, totalShots = 0,
+        description = "Cada 4 s, una toma de 2 s equivalentes (frames sumados) a ISO 1600 durante 30 min. MP4 4K a 24 fps + JPEG por toma.",
+        iso = 1600, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 18, totalExposureNs = 2 * Preset.SEC, stackMode = StackMode.ADD,
+        intervalMs = 4_000, durationMs = 30 * 60_000L, totalShots = 0,
         saveRaw = false, saveJpeg = true, makeVideo = true, videoFps = 24,
         focusDiopters = 0f, wbKelvin = 3800, cameraId = "0", countdownSec = 3,
     )
@@ -130,8 +140,8 @@ object Presets {
     val LONG_EXPOSURE = Preset(
         id = "long_exposure",
         name = "Exposición larga",
-        description = "Tomas a la exposición máxima que Samsung permite a la app, sumadas hasta equivaler a 30 s de obturación.",
-        iso = 800, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 8, totalExposureNs = 30 * Preset.SEC, stackMode = StackMode.ADD,
+        description = "Suma frames a ISO 800 hasta 30 s de exposición equivalente: agua sedosa, estelas de luz, nubes. DNG 16 bits + JPEG.",
+        iso = 800, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 270, totalExposureNs = 30 * Preset.SEC, stackMode = StackMode.ADD,
         intervalMs = 0, durationMs = 0, totalShots = 1,
         saveRaw = true, saveJpeg = true, makeVideo = false, videoFps = 24,
         focusDiopters = 0f, wbKelvin = 4000, cameraId = "0", countdownSec = 3,
@@ -140,8 +150,8 @@ object Presets {
     val LONG_EXPOSURE_TIMELAPSE = Preset(
         id = "long_exposure_timelapse",
         name = "Exposición larga · timelapse",
-        description = "Cada 20 s, una exposición larga apilada equivalente a 15 s. 30 min → MP4 4K con movimiento suave de nubes/aurora.",
-        iso = 800, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 4, totalExposureNs = 15 * Preset.SEC, stackMode = StackMode.ADD,
+        description = "Cada 20 s, una exposición equivalente a 10 s. 30 min → MP4 4K con movimiento suave de nubes/aurora.",
+        iso = 800, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 90, totalExposureNs = 10 * Preset.SEC, stackMode = StackMode.ADD,
         intervalMs = 20_000, durationMs = 30 * 60_000L, totalShots = 0,
         saveRaw = false, saveJpeg = true, makeVideo = true, videoFps = 24,
         focusDiopters = 0f, wbKelvin = 4000, cameraId = "0", countdownSec = 3,
@@ -150,8 +160,8 @@ object Presets {
     val MILKY_WAY = Preset(
         id = "milky_way",
         name = "Vía Láctea / estrellas",
-        description = "Tomas a ISO 3200 y exposición máxima hasta sumar 60 s, promediadas para bajar el ruido. DNG + JPEG.",
-        iso = 3200, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 16, totalExposureNs = 60 * Preset.SEC, stackMode = StackMode.AVERAGE,
+        description = "Suma frames a ISO 3200 hasta 30 s equivalentes. Sin alineación: las estrellas se mueven poco en 30 s con el gran angular. DNG + JPEG.",
+        iso = 3200, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 270, totalExposureNs = 30 * Preset.SEC, stackMode = StackMode.ADD,
         intervalMs = 0, durationMs = 0, totalShots = 1,
         saveRaw = true, saveJpeg = true, makeVideo = false, videoFps = 24,
         focusDiopters = 0f, wbKelvin = 4000, cameraId = "0", countdownSec = 3,
@@ -160,11 +170,12 @@ object Presets {
     val STAR_TRAILS = Preset(
         id = "star_trails",
         name = "Star trails",
-        description = "Tomas continuas a exposición máxima durante 60 min, fusionadas con 'aclarar' (máximo). DNG + JPEG finales y MP4 con la estela creciendo.",
-        iso = 800, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 1, stackMode = StackMode.LIGHTEN,
+        description = "Tomas continuas de 4 s equivalentes a ISO 800 durante 60 min, fusionadas con 'aclarar'. DNG + JPEG finales y MP4 1080p con la estela creciendo.",
+        iso = 800, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 36, totalExposureNs = 4 * Preset.SEC, stackMode = StackMode.LIGHTEN,
         intervalMs = 0, durationMs = 60 * 60_000L, totalShots = 0,
         saveRaw = true, saveJpeg = true, makeVideo = true, videoFps = 30,
         focusDiopters = 0f, wbKelvin = 4000, cameraId = "0", countdownSec = 3,
+        videoHalfRes = true,
     )
 
     val ALL: List<Preset> = listOf(

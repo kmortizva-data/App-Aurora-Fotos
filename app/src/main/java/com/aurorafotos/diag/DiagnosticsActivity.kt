@@ -51,6 +51,7 @@ class DiagnosticsActivity : Activity() {
         form.addView(text)
         val buttons = findViewById<LinearLayout>(R.id.buttons)
         buttons.addView(Ui.button(this, getString(R.string.btn_test_dng), primary = true) { testCapture() })
+        buttons.addView(Ui.button(this, "Probar exposición forzada (0.5 → 30 s)") { probeForcedExposure() })
         buttons.addView(Ui.button(this, getString(R.string.btn_copy)) {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("diag", report))
@@ -104,6 +105,56 @@ class DiagnosticsActivity : Activity() {
 
     private fun extName(v: Int) = when (v) {
         0 -> "AUTO"; 1 -> "FACE_RETOUCH"; 2 -> "BOKEH"; 3 -> "HDR"; 4 -> "NIGHT"; else -> v.toString()
+    }
+
+    /**
+     * Requests exposures above the declared range with AE off and reports what the sensor
+     * really applied (CaptureResult.SENSOR_EXPOSURE_TIME) and how long the frame took.
+     */
+    private fun probeForcedExposure() {
+        text.text = report + "\n\nProbando exposiciones por encima del límite declarado… (puede tardar un par de minutos)"
+        scope.launch {
+            val id = Presets.AURORA_PHOTO.cameraId
+            var controller: CameraController? = null
+            val lines = StringBuilder("\n\n== Prueba de exposición forzada (cámara $id) ==\n")
+            try {
+                val info = CameraInfo.load(this@DiagnosticsActivity, id)
+                controller = CameraController(this@DiagnosticsActivity, info)
+                controller.open()
+                controller.configure(null, wantRaw = true, wantJpeg = false, rawBuffers = 4)
+                lines.appendLine("Máximo declarado: ${Fmt.exposure(info.maxExposureNs)}")
+                val targets = listOf(500_000_000L, 1_000_000_000L, 2_000_000_000L, 4_000_000_000L, 8_000_000_000L, 30_000_000_000L)
+                var honoured = 0
+                for (t in targets) {
+                    val p = ExposureParams(iso = info.clampIso(800), exposureNs = t, focusDiopters = 0f,
+                        awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO, clampToRange = false)
+                    val t0 = System.nanoTime()
+                    val outcome = try {
+                        controller.captureRawBurst(p, 1) { _, _ -> }
+                    } catch (e: Throwable) {
+                        lines.appendLine("pedido ${Fmt.exposure(t)} → ERROR ${e.javaClass.simpleName}: ${e.message}")
+                        break
+                    }
+                    val wall = (System.nanoTime() - t0) / 1e9
+                    val applied = outcome.appliedExposureNs
+                    val ok = applied > info.maxExposureNs * 1.5
+                    lines.appendLine("pedido ${Fmt.exposure(t)} → aplicado ${Fmt.exposure(applied)} (${String.format(java.util.Locale.US, "%.1f", wall)} s reales) ${if (ok) "✔ RESPETADO" else "✘ recortado"}")
+                    text.text = report + lines
+                    if (ok) honoured++
+                    // Two consecutive clamps: no point in waiting 30 s for the last one.
+                    if (!ok && t >= 2_000_000_000L) break
+                }
+                lines.appendLine(if (honoured > 0) "Conclusión: el sensor acepta exposiciones por encima del límite. Activa 'Forzar exposición' en los presets y pon la exposición que quieras."
+                    else "Conclusión: el sensor recorta al máximo declarado. La app seguirá sumando frames.")
+            } catch (t: Throwable) {
+                lines.appendLine("ERROR: $t")
+            } finally {
+                controller?.close()
+            }
+            report += lines.toString()
+            text.text = report
+            runCatching { MediaSaver(this@DiagnosticsActivity, "diag_${Fmt.sessionStamp()}").saveText("diag_forzada.txt", report) }
+        }
     }
 
     private fun testCapture() {

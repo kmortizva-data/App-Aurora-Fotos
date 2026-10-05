@@ -39,6 +39,8 @@ class SettingsActivity : Activity() {
     private lateinit var wb: EditText
     private lateinit var camera: Spinner
     private lateinit var countdown: EditText
+    private lateinit var forceExposure: CheckBox
+    private lateinit var videoHalfRes: CheckBox
     private var cameraIds: List<String> = listOf("0")
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,12 +82,14 @@ class SettingsActivity : Activity() {
         val p = preset
         iso = field("ISO", p.iso.toString(), help = "El S24 Ultra suele exponer 50–3200 a terceros; se recorta al rango real.")
         exposure = field("Exposición por frame (s)", if (p.exposureNs == Preset.MAX_EXPOSURE) "max" else fmt(p.exposureNs / 1e9), numeric = false,
-            help = "Escribe \"max\" para usar la máxima que permite el dispositivo (~3.9 s en S24 Ultra).")
+            help = "Escribe \"max\" para usar la máxima que el teléfono declara a apps de terceros (1/9 s en el S24 Ultra).")
+        forceExposure = check("Forzar la exposición aunque supere el límite declarado (experimental)", p.forceExposure)
+        form.addView(Ui.label(this, "Pide el valor de arriba tal cual; el sensor puede ignorarlo. Comprueba primero con el Diagnóstico → Probar exposición forzada.", dim = true, size = 12f))
         totalExposure = field("Exposición total objetivo por toma (s)", fmt(p.totalExposureNs / 1e9),
             help = "Si es > 0, la app calcula cuántos frames hacen falta con la exposición real del teléfono (p. ej. 30 s ÷ 3.9 s = 8 frames). 0 = usar el número fijo de abajo.")
         frames = field("Frames por toma (si el objetivo es 0)", p.framesPerShot.toString(), help = "Se apilan según el modo de abajo (1–${Preset.MAX_FRAMES}).")
         form.addView(Ui.label(this, "Apilado", size = 13f, bold = true).apply { setPadding(0, Ui.dp(this@SettingsActivity, 12), 0, 0) })
-        form.addView(Ui.label(this, "NONE: guarda cada frame · AVERAGE: promedio (menos ruido) · ADD: suma (más brillo, simula obturación larga) · LIGHTEN: máximo acumulado en toda la sesión (star trails)", dim = true, size = 12f))
+        form.addView(Ui.label(this, "ADD: suma los frames = exposición larga real (recomendado) · AVERAGE: mismos datos pero el JPEG/DNG se ven con el brillo de un solo frame · LIGHTEN: cada toma se suma y las tomas se fusionan con el máximo (star trails) · NONE: guarda cada frame suelto", dim = true, size = 12f))
         stack = Spinner(this).apply {
             adapter = ArrayAdapter(this@SettingsActivity, android.R.layout.simple_spinner_dropdown_item, StackMode.values().map { it.name })
             setSelection(p.stackMode.ordinal)
@@ -98,6 +102,7 @@ class SettingsActivity : Activity() {
         saveJpeg = check("Guardar JPEG", p.saveJpeg)
         makeVideo = check("Montar video MP4 (timelapse)", p.makeVideo)
         fps = field("FPS del video", p.videoFps.toString())
+        videoHalfRes = check("Frames de video a media resolución (más rápido, 1080p)", p.videoHalfRes)
         focus = field("Enfoque (dioptrías, 0 = infinito)", fmt(p.focusDiopters.toDouble()), help = "Si las estrellas salen desenfocadas prueba 0.1–0.3.")
         wb = field("Balance de blancos (K, 0 = auto)", p.wbKelvin.toString(), help = "Solo afecta al JPEG; el DNG se ajusta después.")
         form.addView(Ui.label(this, getString(R.string.lens_label), size = 13f, bold = true).apply { setPadding(0, Ui.dp(this@SettingsActivity, 12), 0, 0) })
@@ -137,6 +142,8 @@ class SettingsActivity : Activity() {
                 wbKelvin = wb.text.toString().toInt().coerceAtLeast(0),
                 cameraId = cameraIds.getOrElse(camera.selectedItemPosition) { preset.cameraId },
                 countdownSec = countdown.text.toString().toInt().coerceIn(0, 120),
+                forceExposure = forceExposure.isChecked,
+                videoHalfRes = videoHalfRes.isChecked,
             )
             store.save(np)
             Toast.makeText(this, "Guardado", Toast.LENGTH_SHORT).show()

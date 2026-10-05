@@ -8,30 +8,39 @@ Presets incluidos:
 
 | Preset | Qué hace | Salida |
 |---|---|---|
-| Aurora · foto | tomas de 3 s ISO 1600 hasta 12 s totales, apiladas (promedio) | DNG + JPEG |
-| Aurora · timelapse | 1 toma de 2 s cada 3 s durante 30 min | JPEG por frame + MP4 4K 24 fps |
-| Exposición larga | tomas a exposición máxima sumadas hasta 30 s totales | DNG + JPEG |
-| Exposición larga · timelapse | 15 s equivalentes cada 20 s durante 30 min | JPEG + MP4 |
-| Vía Láctea / estrellas | tomas a máx ISO 3200 hasta 60 s totales, promediadas | DNG + JPEG |
-| Star trails | continuo 60 min, fusión "aclarar" | DNG + JPEG finales + MP4 con la estela creciendo |
+| Aurora · foto | frames sumados a ISO 1600 hasta 8 s equivalentes | DNG 16 bit + JPEG |
+| Aurora · timelapse | cada 4 s una toma de 2 s equivalentes, 30 min | JPEG por toma + MP4 4K 24 fps |
+| Exposición larga | frames sumados a ISO 800 hasta 30 s equivalentes | DNG 16 bit + JPEG |
+| Exposición larga · timelapse | 10 s equivalentes cada 20 s durante 30 min | JPEG + MP4 4K |
+| Vía Láctea / estrellas | frames sumados a ISO 3200 hasta 30 s equivalentes | DNG 16 bit + JPEG |
+| Star trails | tomas de 4 s equivalentes durante 60 min, fusión "aclarar" | DNG + JPEG finales + MP4 1080p con la estela creciendo |
 
 Todo es editable en **Ajustes del preset** (ISO, exposición, frames, modo de apilado, intervalo,
 duración, lente, enfoque, WB, fps…). Los archivos se guardan en `DCIM/AuroraFotos/<sesión>/`
 junto con un `_info.txt` con los parámetros reales aplicados.
 
-## Por qué apila tomas cortas en vez de una de 30 s
+## Por qué suma frames cortos en vez de hacer una toma de 30 s
 
-Samsung solo deja a las apps de terceros usar exposiciones de hasta **~3.9 s** por Camera2
-(Expert RAW y el modo Pro de Samsung tienen acceso privilegiado y llegan a 30 s). Por eso la app
-captura ráfagas de tomas cortas y las fusiona en el propio teléfono, en el dominio RAW (Bayer, 16 bit).
-Cada preset define una **exposición total objetivo** (p. ej. 30 s) y la app calcula en el momento cuántos
-frames hacen falta con el máximo real del teléfono (30 s ÷ 3.9 s = 8 frames; 30 s ÷ 0.5 s = 60 frames):
+Samsung solo deja a las apps de terceros exposiciones muy cortas por Camera2: en el S24 Ultra
+probado, **1/9 s (111 ms) por frame** (Expert RAW y el modo Pro tienen acceso privilegiado y
+llegan a 30 s). Por eso la app captura ráfagas RAW encadenadas y las **suma** en el propio teléfono,
+en el dominio Bayer con acumuladores de 32 bits: fotón a fotón, 270 frames de 1/9 s son una
+exposición de 30 s. Cada preset define una **exposición total objetivo** y la app calcula en el
+momento cuántos frames necesita con la exposición que el sensor aplica de verdad.
 
-- **AVERAGE**: promedio → menos ruido, mismo brillo (auroras, Vía Láctea).
-- **ADD**: suma de la señal sobre el nivel de negro, recortada al nivel de blanco → brillo de una exposición N veces más larga.
-- **LIGHTEN**: máximo por píxel acumulado en toda la sesión → star trails.
+El resultado se guarda como **DNG lineal de 16 bits** con sus propios niveles y
+`BaselineExposure = log2(frames)`, así que Lightroom / Camera Raw lo abren como la exposición larga
+que es, con las altas luces recuperables. El JPEG y los frames del video se generan en la app con un
+demosaico propio (balance de blancos y matriz de color del sensor, ganancia automática, gamma sRGB).
 
-Para auroras, tomas de 1–4 s son de hecho mejores que una de 30 s (no se emborrona el movimiento).
+Modos de apilado: **ADD** (suma = exposición larga, recomendado), **AVERAGE** (mismos datos, se ve con
+el brillo de un frame), **LIGHTEN** (cada toma se suma y las tomas se fusionan con el máximo: star trails),
+**NONE** (cada frame suelto).
+
+Un ingeniero de Samsung ha dicho que *pedir* una exposición mayor a la declarada a veces funciona. El
+Diagnóstico incluye **Probar exposición forzada**: pide 0.5 → 30 s y reporta qué aplicó el sensor. Si lo
+respeta, activa "Forzar exposición" en los presets.
+
 Ver [docs/estado-del-arte.md](docs/estado-del-arte.md) para la investigación completa.
 
 ## Instalar
@@ -71,7 +80,7 @@ app/src/main/java/com/aurorafotos/
   camera/     CameraInfo (características), CameraController (captura manual RAW+JPEG)
   capture/    CaptureEngine (sesión: cuenta atrás, tomas, apilado, video), CaptureService (FGS cámara)
   presets/    Preset, Presets (los 6), PresetStore (overrides del usuario)
-  stacking/   RawStacker (Bayer 16 bit), BitmapStacker (JPEG), DngWriter
+  stacking/   RawStacker (sumas Bayer 32 bit), DngWriter + DngPatcher (DNG 16 bit), RawDemosaic/RawRender
   video/      TimelapseEncoder (MediaCodec HEVC/AVC + MediaMuxer, 4K)
   storage/    MediaSaver (MediaStore → DCIM/AuroraFotos)
   ui/         MainActivity, CaptureActivity (encuadre + progreso), SettingsActivity

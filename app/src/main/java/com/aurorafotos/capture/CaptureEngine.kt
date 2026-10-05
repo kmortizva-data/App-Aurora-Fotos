@@ -3,6 +3,7 @@ package com.aurorafotos.capture
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.hardware.camera2.TotalCaptureResult
 import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
@@ -11,12 +12,13 @@ import android.util.Log
 import com.aurorafotos.camera.CameraController
 import com.aurorafotos.camera.CameraInfo
 import com.aurorafotos.camera.ExposureParams
-import com.aurorafotos.camera.Frame
 import com.aurorafotos.presets.Preset
 import com.aurorafotos.presets.StackMode
-import com.aurorafotos.stacking.BitmapStacker
+import com.aurorafotos.stacking.DngPatcher
 import com.aurorafotos.stacking.DngWriter
+import com.aurorafotos.stacking.RawRender
 import com.aurorafotos.stacking.RawStacker
+import com.aurorafotos.stacking.StackResult
 import com.aurorafotos.storage.MediaSaver
 import com.aurorafotos.util.Fmt
 import com.aurorafotos.video.TimelapseEncoder
@@ -29,13 +31,17 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 /**
- * Runs one unattended session for a [Preset]: countdown, N shots (each a burst of frames,
- * optionally stacked), saving DNG/JPEG as it goes, then the timelapse MP4.
+ * Runs one unattended session for a [Preset]. RAW only: every frame goes straight into a
+ * 32-bit Bayer accumulator, so a "30 s" shot on a phone that only allows 1/9 s per frame is
+ * simply ~270 summed frames. Outputs per shot: a 16-bit DNG that Lightroom renders as the
+ * long exposure it is (BaselineExposure = log2(frames)) and a JPEG rendered on-device.
  *
  * Stacking semantics:
- *  - AVERAGE / ADD: frames of each shot are merged into one image per shot.
- *  - LIGHTEN: one rolling stack across the whole session (star trails); a JPEG of the
- *    running stack is saved per frame so the video shows the trails growing.
+ *  - NONE: every frame is saved on its own.
+ *  - AVERAGE / ADD: frames of a shot are merged into one image (same DNG data; AVERAGE renders
+ *    at one frame's brightness, ADD at the summed brightness).
+ *  - LIGHTEN: each shot is an ADD stack, and shots are merged with per-pixel maximum across
+ *    the session (star trails); a frame of the running result is kept per shot for the video.
  */
 class CaptureEngine(private val context: Context) {
     private val tag = "CaptureEngine"
@@ -62,32 +68,34 @@ class CaptureEngine(private val context: Context) {
         val saver = MediaSaver(context, sessionName)
         val startedAt = SystemClock.elapsedRealtime()
         val log = StringBuilder()
-        val jpegUris = ArrayList<Uri>()
+        val videoUris = ArrayList<Uri>()
         val rolling = preset.stackMode == StackMode.LIGHTEN
-        var rollingRaw: RawStacker? = null
-        var rollingBmp: BitmapStacker? = null
-        var lastResult: android.hardware.camera2.TotalCaptureResult? = null
+        var rollingStack: StackResult? = null
+        var lastResult: TotalCaptureResult? = null
 
-        val wantRaw = preset.saveRaw && info.hasRaw
-        val exposureNs = if (preset.exposureNs == Preset.MAX_EXPOSURE) info.maxExposureNs else info.clampExposure(preset.exposureNs)
+        val requestedExposure = if (preset.exposureNs == Preset.MAX_EXPOSURE) info.maxExposureNs else preset.exposureNs
         val iso = info.clampIso(preset.iso)
-        val framesPerShot = preset.effectiveFrames(exposureNs)
-        val jpegOrientation = jpegOrientation(info, deviceRotation)
+        val orientation = jpegOrientation(info, deviceRotation)
+        val cfa = RawRender.cfaOf(info.characteristics)
         val params = ExposureParams(
-            iso = iso, exposureNs = exposureNs, focusDiopters = preset.focusDiopters,
+            iso = iso, exposureNs = requestedExposure, focusDiopters = preset.focusDiopters,
             awbMode = CameraInfo.awbModeForKelvin(preset.wbKelvin, info.awbModes),
-            jpegOrientation = jpegOrientation,
+            jpegOrientation = orientation, clampToRange = !preset.forceExposure,
         )
+        var appliedExposure = 0L
+        var framesPerShot = if (preset.stackMode == StackMode.NONE) 1 else preset.effectiveFrames(info.clampExposure(requestedExposure))
+
         log.appendLine("Aurora Fotos · sesión $sessionName")
         log.appendLine("Dispositivo: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})")
         log.appendLine("Preset: ${preset.name} [${preset.id}]")
-        log.appendLine("Cámara: ${preset.cameraId}  RAW: $wantRaw (${controller.rawSize})  JPEG: ${controller.jpegSize}")
-        log.appendLine("ISO pedido ${preset.iso} → aplicado $iso; exposición pedida ${Fmt.exposure(preset.exposureNs)} → aplicada ${Fmt.exposure(exposureNs)} (máx. dispositivo ${Fmt.exposure(info.maxExposureNs)})")
-        log.appendLine("Frames/toma $framesPerShot (preset: ${preset.framesPerShot}, objetivo ${Fmt.exposure(preset.totalExposureNs)} total → ${Fmt.exposure(framesPerShot * exposureNs)}), apilado ${preset.stackMode}, intervalo ${preset.intervalMs} ms, duración ${preset.durationMs} ms, tomas ${preset.totalShots}")
-        log.appendLine("Enfoque ${preset.focusDiopters} dioptrías, WB ${preset.wbKelvin} K, orientación JPEG $jpegOrientation")
+        log.appendLine("Cámara: ${preset.cameraId}  RAW ${controller.rawSize}  CFA $cfa  negro ${info.blackLevel} blanco ${info.whiteLevel}")
+        log.appendLine("ISO pedido ${preset.iso} → aplicado $iso; exposición pedida ${Fmt.exposure(requestedExposure)} (forzar: ${preset.forceExposure}); máx. declarado ${Fmt.exposure(info.maxExposureNs)}")
+        log.appendLine("Objetivo por toma ${Fmt.exposure(preset.totalExposureNs)}, apilado ${preset.stackMode}, intervalo ${preset.intervalMs} ms, duración ${preset.durationMs} ms, tomas ${preset.totalShots}")
+        log.appendLine("Enfoque ${preset.focusDiopters} dpt, WB ${preset.wbKelvin} K, orientación $orientation°")
 
         try {
-            // Countdown so the hand leaves the phone.
+            if (!info.hasRaw) error("La cámara ${preset.cameraId} no expone RAW a apps de terceros")
+
             for (s in preset.countdownSec downTo 1) {
                 if (stopRequested) throw StopException()
                 update { it.copy(state = SessionState.COUNTDOWN, countdown = s) }
@@ -95,9 +103,10 @@ class CaptureEngine(private val context: Context) {
             }
 
             controller.open()
-            controller.configure(null, wantRaw = wantRaw, wantJpeg = true, rawBuffers = 3)
-            update { it.copy(state = SessionState.CAPTURING, exposureNs = exposureNs, iso = iso, framesPerShot = framesPerShot, totalShots = preset.totalShots) }
+            controller.configure(null, wantRaw = true, wantJpeg = false, rawBuffers = 6)
+            update { it.copy(state = SessionState.CAPTURING, exposureNs = requestedExposure, iso = iso, framesPerShot = framesPerShot, totalShots = preset.totalShots) }
 
+            val stacker = RawStacker(controller.rawSize.width, controller.rawSize.height, info.blackLevel, info.whiteLevel)
             val sessionStart = SystemClock.elapsedRealtime()
             var shot = 0
             var frameCounter = 0
@@ -108,126 +117,101 @@ class CaptureEngine(private val context: Context) {
                 if (preset.totalShots == 0 && preset.durationMs > 0 &&
                     SystemClock.elapsedRealtime() - sessionStart >= preset.durationMs) break
 
-                // Keep the interval cadence anchored to the session start.
                 if (preset.intervalMs > 0 && shot > 0) {
                     val due = sessionStart + shot * preset.intervalMs
-                    val wait = due - SystemClock.elapsedRealtime()
-                    if (wait > 0) {
-                        var remaining = wait
-                        while (remaining > 0 && !stopRequested) {
-                            val step = minOf(remaining, 500L)
-                            delay(step); remaining -= step
-                        }
-                        if (stopRequested) break
+                    var remaining = due - SystemClock.elapsedRealtime()
+                    while (remaining > 0 && !stopRequested) {
+                        val step = minOf(remaining, 500L)
+                        delay(step); remaining -= step
                     }
+                    if (stopRequested) break
                 }
                 shot++
                 val shotIdx = shot
                 update { it.copy(shot = shotIdx, frame = 0, elapsedMs = SystemClock.elapsedRealtime() - startedAt) }
+                stacker.reset()
 
-                val perShotStack = preset.stackMode == StackMode.AVERAGE || preset.stackMode == StackMode.ADD
-                val rawStack: RawStacker? = if (perShotStack && wantRaw) RawStacker(controller.rawSize.width, controller.rawSize.height, preset.stackMode, info.blackLevel, info.whiteLevel) else null
-                var bmpStack: BitmapStacker? = null
-
-                controller.captureBurst(params, framesPerShot, wantRaw = wantRaw, wantJpeg = true) { fi, frame ->
-                    try {
-                        frameCounter++
-                        lastResult = frame.result
-                        update { it.copy(frame = fi + 1, elapsedMs = SystemClock.elapsedRealtime() - startedAt) }
-                        val jpeg = frame.jpeg ?: error("sin JPEG")
-                        val (jw, jh) = BitmapStacker.jpegSize(jpeg)
-
-                        when {
-                            rolling -> {
-                                if (wantRaw && frame.raw != null) {
-                                    val r = rollingRaw ?: RawStacker(controller.rawSize.width, controller.rawSize.height, StackMode.LIGHTEN, info.blackLevel, info.whiteLevel).also { rollingRaw = it }
-                                    val plane = frame.raw.planes[0]
-                                    r.add(plane.buffer, plane.rowStride, plane.pixelStride)
-                                }
-                                val b = rollingBmp ?: BitmapStacker(jw, jh, StackMode.LIGHTEN).also { rollingBmp = it }
-                                b.addJpeg(jpeg)
-                                if (preset.makeVideo) {
-                                    val bm = b.result()
-                                    val uri = saver.saveJpeg("${sessionName}_trail_${Fmt.frameIndex(frameCounter)}.jpg", compress(bm))
-                                    bm.recycle()
-                                    jpegUris += uri
-                                }
-                            }
-                            perShotStack -> {
-                                if (rawStack != null && frame.raw != null) {
-                                    val plane = frame.raw.planes[0]
-                                    rawStack.add(plane.buffer, plane.rowStride, plane.pixelStride)
-                                }
-                                val b = bmpStack ?: BitmapStacker(jw, jh, preset.stackMode).also { bmpStack = it }
-                                b.addJpeg(jpeg)
-                            }
-                            else -> {
-                                val base = "${sessionName}_${Fmt.frameIndex(frameCounter)}"
-                                if (wantRaw && frame.raw != null) {
-                                    saveDngSafely(saver, log, "$base.dng") { out ->
-                                        DngWriter.write(out, info.characteristics, frame.result, frame.raw, exifOrientation(jpegOrientation), "Aurora Fotos ${preset.name}")
-                                    }
-                                }
-                                if (preset.saveJpeg || preset.makeVideo) jpegUris += saver.saveJpeg("$base.jpg", jpeg)
-                            }
-                        }
-                    } finally {
-                        frame.close()
+                // The first frame of the session tells us what exposure the HAL really applies.
+                var toCapture = framesPerShot
+                if (appliedExposure == 0L) {
+                    val probe = controller.captureRawBurst(params, 1, { false }) { _, img ->
+                        val pl = img.planes[0]; stacker.add(pl.buffer, pl.rowStride, pl.pixelStride)
                     }
+                    frameCounter++
+                    lastResult = probe.lastResult
+                    appliedExposure = probe.appliedExposureNs
+                    if (preset.stackMode != StackMode.NONE) framesPerShot = preset.effectiveFrames(appliedExposure)
+                    toCapture = framesPerShot - 1
+                    val fps = framesPerShot
+                    update { it.copy(exposureNs = appliedExposure, framesPerShot = fps, frame = 1) }
+                    log.appendLine("Exposición aplicada por el sensor: ${Fmt.exposure(appliedExposure)} → $framesPerShot frames/toma ≈ ${Fmt.exposure(framesPerShot * appliedExposure)}")
                 }
-
-                if (perShotStack) {
-                    val base = "${sessionName}_shot${Fmt.frameIndex(shotIdx)}"
-                    val rs = rawStack
-                    val lr = lastResult
-                    if (rs != null && lr != null && rs.frames > 0) {
-                        saveDngSafely(saver, log, "$base.dng") { out ->
-                            DngWriter.write(out, info.characteristics, lr, rs.result(), rs.width, rs.height, exifOrientation(jpegOrientation), "Aurora Fotos ${preset.name} · ${rs.frames}×${Fmt.exposure(exposureNs)} ${preset.stackMode}")
+                if (toCapture > 0) {
+                    var lastUi = 0L
+                    val out = controller.captureRawBurst(params, toCapture, { stopRequested }) { i, img ->
+                        val pl = img.planes[0]; stacker.add(pl.buffer, pl.rowStride, pl.pixelStride)
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastUi > 250) {
+                            lastUi = now
+                            val f = stacker.frames
+                            update { it.copy(frame = f, elapsedMs = now - startedAt) }
                         }
                     }
-                    val bs = bmpStack
-                    if (bs != null && bs.frames > 0 && (preset.saveJpeg || preset.makeVideo)) {
-                        val bm = bs.result()
-                        jpegUris += saver.saveJpeg("$base.jpg", compress(bm))
+                    frameCounter += out.frames
+                    out.lastResult?.let { lastResult = it }
+                }
+                val f = stacker.frames
+                update { it.copy(frame = f, elapsedMs = SystemClock.elapsedRealtime() - startedAt) }
+                if (stacker.frames == 0) continue
+
+                val shotStack = stacker.result()
+                val lr = lastResult
+                if (rolling) {
+                    val acc = rollingStack
+                    if (acc == null) rollingStack = shotStack else acc.lightenInPlace(shotStack)
+                    if (preset.makeVideo) {
+                        val bm = renderJpegBitmap(rollingStack!!, cfa, lr, StackMode.ADD, preset.videoHalfRes, orientation)
+                        videoUris += saver.saveJpeg("${sessionName}_trail_${Fmt.frameIndex(shotIdx)}.jpg", RawRender.jpeg(bm))
                         bm.recycle()
                     }
-                    bmpStack = null
-                }
-                log.appendLine("Toma $shotIdx terminada a +${SystemClock.elapsedRealtime() - sessionStart} ms")
-            }
-
-            // Final rolling stack outputs (star trails).
-            if (rolling) {
-                val lr = lastResult
-                val rr = rollingRaw
-                if (rr != null && lr != null && rr.frames > 0 && wantRaw) {
-                    saveDngSafely(saver, log, "${sessionName}_startrails.dng") { out ->
-                        DngWriter.write(out, info.characteristics, lr, rr.result(), rr.width, rr.height, exifOrientation(jpegOrientation), "Aurora Fotos star trails · ${rr.frames} frames")
+                } else {
+                    val base = if (preset.stackMode == StackMode.NONE) "${sessionName}_${Fmt.frameIndex(frameCounter)}" else "${sessionName}_shot${Fmt.frameIndex(shotIdx)}"
+                    if (preset.saveRaw && lr != null) saveStackDng(saver, log, info, lr, shotStack, preset.stackMode, orientation, "$base.dng", preset.name)
+                    if (preset.saveJpeg || preset.makeVideo) {
+                        val bm = renderJpegBitmap(shotStack, cfa, lr, preset.stackMode, preset.makeVideo && preset.videoHalfRes, orientation)
+                        val uri = saver.saveJpeg("$base.jpg", RawRender.jpeg(bm))
+                        bm.recycle()
+                        if (preset.makeVideo) videoUris += uri
                     }
                 }
-                val rb = rollingBmp
-                if (rb != null && rb.frames > 0 && preset.saveJpeg) {
-                    val bm = rb.result()
-                    saver.saveJpeg("${sessionName}_startrails.jpg", compress(bm))
-                    bm.recycle()
+                log.appendLine("Toma $shotIdx: ${shotStack.frames} frames, terminada a +${SystemClock.elapsedRealtime() - sessionStart} ms")
+            }
+
+            if (rolling) {
+                val acc = rollingStack
+                val lr = lastResult
+                if (acc != null && lr != null) {
+                    if (preset.saveRaw) saveStackDng(saver, log, info, lr, acc, StackMode.LIGHTEN, orientation, "${sessionName}_startrails.dng", preset.name)
+                    if (preset.saveJpeg) {
+                        val bm = renderJpegBitmap(acc, cfa, lr, StackMode.ADD, false, orientation)
+                        saver.saveJpeg("${sessionName}_startrails.jpg", RawRender.jpeg(bm))
+                        bm.recycle()
+                    }
                 }
             }
             update { it.copy(state = SessionState.PROCESSING, elapsedMs = SystemClock.elapsedRealtime() - startedAt) }
             controller.close()
 
-            if (preset.makeVideo && jpegUris.size >= 2) {
-                makeVideo(saver, sessionName, preset.videoFps, jpegUris)
-            }
+            if (preset.makeVideo && videoUris.size >= 2) makeVideo(saver, sessionName, preset.videoFps, videoUris)
             if ((!preset.saveJpeg || rolling) && preset.makeVideo) {
-                // Intermediate JPEGs were only kept to build the video.
-                jpegUris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
+                videoUris.forEach { runCatching { context.contentResolver.delete(it, null, null) } }
             }
-            val summary = "$frameCounter frames × ${Fmt.exposure(exposureNs)} = ${Fmt.exposure(frameCounter * exposureNs)} de exposición, ISO $iso, ${Fmt.seconds(SystemClock.elapsedRealtime() - startedAt)} en total"
+            val summary = "$frameCounter frames × ${Fmt.exposure(appliedExposure)} = ${Fmt.exposure(frameCounter * appliedExposure)} de exposición, ISO $iso, ${Fmt.seconds(SystemClock.elapsedRealtime() - startedAt)} en total"
             log.appendLine("Resumen: $summary (tomas: $shot)")
             runCatching { saver.saveText("${sessionName}_info.txt", log.toString()) }
             update { it.copy(state = SessionState.DONE, elapsedMs = SystemClock.elapsedRealtime() - startedAt, message = summary) }
         } catch (e: StopException) {
-            update { it.copy(state = SessionState.DONE, message = saver.relativePath) }
+            update { it.copy(state = SessionState.DONE, message = "Detenido antes de empezar") }
         } catch (t: Throwable) {
             Log.e(tag, "session failed", t)
             runCatching { saver.saveText("${sessionName}_error.txt", log.toString() + "\n" + Log.getStackTraceString(t)) }
@@ -237,10 +221,45 @@ class CaptureEngine(private val context: Context) {
         }
     }
 
+    private fun renderJpegBitmap(stack: StackResult, cfa: Int, result: TotalCaptureResult?, mode: StackMode, halfRes: Boolean, orientation: Int): Bitmap {
+        val exposureFrames = if (mode == StackMode.AVERAGE) stack.frames else 1
+        val bm = RawRender.render(stack, cfa, result, exposureFrames, halfRes)
+        return RawRender.rotated(bm, orientation)
+    }
+
+    /** Writes the stack as a 16-bit DNG with its own levels and BaselineExposure; never fatal. */
+    private fun saveStackDng(
+        saver: MediaSaver, log: StringBuilder, info: CameraInfo, result: TotalCaptureResult,
+        stack: StackResult, mode: StackMode, orientation: Int, name: String, presetName: String,
+    ) {
+        try {
+            val d16 = stack.toDng16()
+            val bos = ByteArrayOutputStream(stack.pixelCount * 2 + 65536)
+            DngWriter.write(
+                bos, info.characteristics, result, d16.toByteBuffer(), stack.width, stack.height,
+                exifOrientation(orientation), "Aurora Fotos $presetName · ${stack.frames} frames $mode"
+            )
+            val raw = bos.toByteArray()
+            val ev = if (mode == StackMode.AVERAGE) 0.0 else Math.log(stack.frames.toDouble()) / Math.log(2.0)
+            val patched = try {
+                DngPatcher.patch(raw, d16.whiteLevel, 0, ev)
+            } catch (t: Throwable) {
+                log.appendLine("AVISO: no se pudo ajustar niveles del DNG $name ($t); se guarda sin ajustar")
+                raw
+            }
+            saver.saveDng(name) { it.write(patched) }
+        } catch (t: Throwable) {
+            Log.e(tag, "DNG $name failed", t)
+            log.appendLine("AVISO: no se pudo escribir $name: $t")
+            update { it.copy(message = "DNG falló: ${t.message ?: t.javaClass.simpleName}") }
+        }
+    }
+
     private fun makeVideo(saver: MediaSaver, sessionName: String, fps: Int, frames: List<Uri>) {
         val first = saver.readBytes(frames[0])
-        val (w, _) = BitmapStacker.jpegSize(first)
-        val (vw, vh) = TimelapseEncoder.outputSizeFor(w)
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(first, 0, first.size, o)
+        val (vw, vh) = TimelapseEncoder.outputSizeFor(o.outWidth, o.outHeight)
         val encoder = TimelapseEncoder(vw, vh, fps)
         val (uri, pfd) = saver.openVideo("${sessionName}_timelapse_${fps}fps.mp4")
         var ok = false
@@ -257,23 +276,6 @@ class CaptureEngine(private val context: Context) {
         } finally {
             saver.finishVideo(uri, ok)
         }
-    }
-
-    /** DngCreator is picky on some Samsung firmwares; a failed DNG is logged, not fatal. */
-    private fun saveDngSafely(saver: MediaSaver, log: StringBuilder, name: String, writer: (java.io.OutputStream) -> Unit) {
-        try {
-            saver.saveDng(name, writer)
-        } catch (t: Throwable) {
-            Log.e(tag, "DNG $name failed", t)
-            log.appendLine("AVISO: no se pudo escribir $name: $t")
-            update { it.copy(message = "DNG falló: ${t.message ?: t.javaClass.simpleName}") }
-        }
-    }
-
-    private fun compress(bm: Bitmap): ByteArray {
-        val bos = ByteArrayOutputStream(bm.byteCount / 8)
-        bm.compress(Bitmap.CompressFormat.JPEG, 95, bos)
-        return bos.toByteArray()
     }
 
     private class StopException : RuntimeException("stopped")

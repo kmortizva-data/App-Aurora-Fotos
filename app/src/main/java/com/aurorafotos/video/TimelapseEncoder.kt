@@ -146,7 +146,12 @@ class TimelapseEncoder(
             }
         }
 
-        /** Picks 4K UHD when the source is at least that wide, otherwise 1080p. */
-        fun outputSizeFor(srcW: Int): Pair<Int, Int> = if (srcW >= 3840) 3840 to 2160 else 1920 to 1080
+        /** 4K UHD when the source's long side allows it, otherwise 1080p; portrait sources give portrait video. */
+        fun outputSizeFor(srcW: Int, srcH: Int): Pair<Int, Int> {
+            val portrait = srcH > srcW
+            val long = maxOf(srcW, srcH)
+            val (a, b) = if (long >= 3840) 3840 to 2160 else 1920 to 1080
+            return if (portrait) b to a else a to b
+        }
     }
 }
