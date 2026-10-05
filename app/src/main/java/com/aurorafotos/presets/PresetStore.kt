@@ -22,6 +22,10 @@ class PresetStore(context: Context) {
         prefs.edit().remove(id).apply()
     }
 
+    var lastModule: Module
+        get() = runCatching { Module.valueOf(prefs.getString("last_module", Module.PHOTO.name)!!) }.getOrDefault(Module.PHOTO)
+        set(value) = prefs.edit().putString("last_module", value.name).apply()
+
     var lastSelectedId: String
         get() = prefs.getString("last_selected", Presets.AURORA_PHOTO.id) ?: Presets.AURORA_PHOTO.id
         set(value) = prefs.edit().putString("last_selected", value).apply()

@@ -5,6 +5,9 @@ enum class StackMode { NONE, AVERAGE, ADD, LIGHTEN }
 
 enum class PresetKind { PHOTO, VIDEO }
 
+/** How presets are grouped in the UI. */
+enum class Module(val title: String) { PHOTO("Fotos"), TIMELAPSE("Timelapse"), VIDEO("Video") }
+
 /**
  * Everything the capture engine needs to run a session unattended.
  *
@@ -55,6 +58,14 @@ data class Preset(
     val kind: PresetKind = PresetKind.PHOTO,
 ) {
     val isVideo: Boolean get() = kind == PresetKind.VIDEO
+
+    /** Fotos = una toma apilada; Timelapse = secuencias y star trails; Video = grabación real. */
+    val module: Module
+        get() = when {
+            kind == PresetKind.VIDEO -> Module.VIDEO
+            makeVideo || intervalMs > 0 || totalShots != 1 -> Module.TIMELAPSE
+            else -> Module.PHOTO
+        }
 
     val isTimelapse: Boolean get() = intervalMs > 0 || totalShots != 1
 

@@ -14,6 +14,7 @@ import com.aurorafotos.R
 import com.aurorafotos.capture.CaptureService
 import com.aurorafotos.capture.SessionState
 import com.aurorafotos.diag.DiagnosticsActivity
+import com.aurorafotos.presets.Module
 import com.aurorafotos.presets.Preset
 import com.aurorafotos.presets.PresetStore
 import com.aurorafotos.util.Fmt
@@ -27,6 +28,9 @@ class MainActivity : Activity() {
     private lateinit var list: LinearLayout
     private lateinit var status: TextView
     private lateinit var btnStart: Button
+    private lateinit var tabs: LinearLayout
+    private lateinit var moduleHint: TextView
+    private var module: Module = Module.PHOTO
     private var selectedId: String = ""
     private val scope = MainScope()
     private var service: CaptureService? = null
@@ -65,7 +69,11 @@ class MainActivity : Activity() {
         list = findViewById(R.id.presetList)
         status = findViewById(R.id.statusText)
         btnStart = findViewById(R.id.btnStart)
+        tabs = findViewById(R.id.moduleTabs)
+        moduleHint = findViewById(R.id.moduleHint)
+        module = store.lastModule
         selectedId = store.lastSelectedId
+        if (store.get(selectedId).module != module) selectedId = store.all().first { it.module == module }.id
 
         btnStart.setOnClickListener { withCameraPermission(REQ_CAPTURE) { openCapture() } }
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
@@ -78,6 +86,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        renderTabs()
         renderPresets()
         bindService(Intent(this, CaptureService::class.java), connection, Context.BIND_AUTO_CREATE)
     }
@@ -140,9 +149,38 @@ class MainActivity : Activity() {
         const val REQ_DIAG = 2
     }
 
+    private fun renderTabs() {
+        tabs.removeAllViews()
+        for (m in Module.values()) {
+            val b = Button(this).apply {
+                text = m.title
+                isAllCaps = false
+                textSize = 14f
+                background = getDrawable(if (m == module) R.drawable.bg_button else R.drawable.bg_button_secondary)
+                setTextColor(getColor(if (m == module) R.color.bg else R.color.text))
+                layoutParams = LinearLayout.LayoutParams(0, Ui.dp(this@MainActivity, 44), 1f).apply {
+                    marginEnd = Ui.dp(this@MainActivity, 6)
+                }
+                setOnClickListener {
+                    module = m
+                    store.lastModule = m
+                    selectedId = store.all().first { it.module == m }.id
+                    store.lastSelectedId = selectedId
+                    renderTabs(); renderPresets()
+                }
+            }
+            tabs.addView(b)
+        }
+        moduleHint.text = when (module) {
+            Module.PHOTO -> "Una sola toma apilada: DNG de 16 bits + JPEG. Elige y pulsa Encuadrar."
+            Module.TIMELAPSE -> "Secuencias de tomas apiladas → JPEG por toma + MP4. Star trails incluido."
+            Module.VIDEO -> "Grabación real con exposición manual (sin audio). 24 fps o obturador lento a 9 fps."
+        }
+    }
+
     private fun renderPresets() {
         list.removeAllViews()
-        for (p in store.all()) {
+        for (p in store.all().filter { it.module == module }) {
             val card = Ui.card(this, p.id == selectedId)
             card.addView(Ui.label(this, p.name, size = 18f, bold = true))
             card.addView(Ui.label(this, p.description, dim = true, size = 13f))
