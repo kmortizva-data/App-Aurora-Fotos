@@ -100,7 +100,7 @@ class CameraInfo(val id: String, val characteristics: CameraCharacteristics) {
         fun pickVideoSize(sizes: List<Pair<Int, Int>>): Pair<Int, Int> {
             val wide = sizes.filter { (w, h) -> Math.abs(w * 9 - h * 16) < 16 && w <= 3840 && h <= 2160 }
             return wide.maxByOrNull { (w, h) -> w.toLong() * h }
-                ?: sizes.filter { (w, h) -> w <= 3840 && h <= 2160 }.maxByOrNull { (w, h) -> w.toLong() * h }
+                ?: sizes.filter { (w, _) -> w <= 3840 }.maxByOrNull { (w, h) -> w.toLong() * h }
                 ?: sizes.maxByOrNull { (w, h) -> w.toLong() * h }
                 ?: (1920 to 1080)
         }
