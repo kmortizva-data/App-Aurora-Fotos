@@ -174,7 +174,7 @@ class MainActivity : Activity() {
         moduleHint.text = when (module) {
             Module.PHOTO -> "Una sola toma apilada: DNG de 16 bits + JPEG. Elige y pulsa Encuadrar."
             Module.TIMELAPSE -> "Secuencias de tomas apiladas → JPEG por toma + MP4. Star trails incluido."
-            Module.VIDEO -> "Grabación real con exposición manual (sin audio). 24 fps o obturador lento a 9 fps."
+            Module.VIDEO -> "Grabación real 4K con exposición manual, sin audio. Para auroras que se mueven rápido; si apenas se mueven, el timelapse las muestra mejor."
         }
     }
 

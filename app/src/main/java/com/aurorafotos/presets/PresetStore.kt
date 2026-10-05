@@ -8,6 +8,7 @@ class PresetStore(context: Context) {
 
     fun get(id: String): Preset {
         val base = Presets.byId(id)
+        if (base.id != id) return base // unknown/removed preset id
         val raw = prefs.getString(id, null) ?: return base
         return runCatching { Preset.deserialize(raw, base) }.getOrDefault(base)
     }

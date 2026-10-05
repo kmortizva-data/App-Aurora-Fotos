@@ -199,7 +199,7 @@ object Presets {
     val AURORA_VIDEO = Preset(
         id = "aurora_video",
         name = "Aurora · video 24 fps",
-        description = "Video 4K real a 24 fps con los parámetros manuales del Pro Video: 1/24 s, ISO 3200, WB fijo, foco a infinito. 10 min o hasta detener.",
+        description = "Video 4K real a 24 fps con los parámetros manuales del Pro Video: 1/24 s, ISO 3200, WB fijo, foco a infinito. Para auroras que se mueven rápido; si apenas se mueven, usa el timelapse. 10 min o hasta detener.",
         iso = 3200, exposureNs = 41_666_667L, framesPerShot = 1, totalExposureNs = 0, stackMode = StackMode.NONE,
         intervalMs = 0, durationMs = 10 * 60_000L, totalShots = 0,
         saveRaw = false, saveJpeg = false, makeVideo = true, videoFps = 24,
@@ -207,20 +207,9 @@ object Presets {
         kind = PresetKind.VIDEO,
     )
 
-    val AURORA_VIDEO_SLOW = Preset(
-        id = "aurora_video_slow",
-        name = "Aurora · video lento 9 fps",
-        description = "Obturador lento: 1/9 s por frame (el máximo que deja Samsung), 9 fps reales, 2.7× más luz que a 24 fps. Ideal para auroras tenues; se reproduce a 9 fps.",
-        iso = 3200, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 1, totalExposureNs = 0, stackMode = StackMode.NONE,
-        intervalMs = 0, durationMs = 10 * 60_000L, totalShots = 0,
-        saveRaw = false, saveJpeg = false, makeVideo = true, videoFps = 9,
-        focusDiopters = 0f, wbKelvin = 3800, cameraId = "0", countdownSec = 3,
-        kind = PresetKind.VIDEO,
-    )
-
     val ALL: List<Preset> = listOf(
-        AURORA_PHOTO, AURORA_TIMELAPSE, AURORA_VIDEO, AURORA_VIDEO_SLOW, LONG_EXPOSURE, LONG_EXPOSURE_TIMELAPSE, MILKY_WAY, STAR_TRAILS
+        AURORA_PHOTO, AURORA_TIMELAPSE, AURORA_VIDEO, LONG_EXPOSURE, LONG_EXPOSURE_TIMELAPSE, MILKY_WAY, STAR_TRAILS
     )
 
-    fun byId(id: String): Preset = ALL.first { it.id == id }
+    fun byId(id: String): Preset = ALL.firstOrNull { it.id == id } ?: AURORA_PHOTO
 }

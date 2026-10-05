@@ -38,7 +38,6 @@ Anota de cada una la **duración real** que muestra al terminar ("N frames × 1/
 | # | Aurora Fotos | Samsung | Comparar |
 |---|---|---|---|
 | 3.1 | **Aurora · video 24 fps** | Pro Video: 4K 24 fps, ISO 3200, 1/24 s, WB 3800 K, foco manual ∞ | Ruido (lo que Samsung reduce mejor), color, nitidez |
-| 3.2 | **Aurora · video lento 9 fps** | Pro Video igual que 3.1 | ¿Compensa la luz extra la menor fluidez? |
 
 ## 4. Qué mandar después
 
