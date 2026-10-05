@@ -67,20 +67,11 @@ class MainActivity : Activity() {
         btnStart = findViewById(R.id.btnStart)
         selectedId = store.lastSelectedId
 
-        btnStart.setOnClickListener {
-            if (!Ui.hasPermissions(this, Ui.REQUIRED_PERMISSIONS)) {
-                requestPermissions(Ui.REQUIRED_PERMISSIONS, 1)
-                return@setOnClickListener
-            }
-            startActivity(Intent(this, CaptureActivity::class.java).putExtra(CaptureActivity.EXTRA_PRESET_ID, selectedId))
-        }
+        btnStart.setOnClickListener { withCameraPermission(REQ_CAPTURE) { openCapture() } }
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_PRESET_ID, selectedId))
         }
-        findViewById<Button>(R.id.btnDiag).setOnClickListener {
-            if (!Ui.hasPermissions(this, Ui.REQUIRED_PERMISSIONS)) requestPermissions(Ui.REQUIRED_PERMISSIONS, 2)
-            else startActivity(Intent(this, DiagnosticsActivity::class.java))
-        }
+        findViewById<Button>(R.id.btnDiag).setOnClickListener { withCameraPermission(REQ_DIAG) { openDiagnostics() } }
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
         findViewById<TextView>(R.id.versionText).text = "v$version · Galaxy S24 Ultra · Camera2"
     }
@@ -103,13 +94,50 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    private fun openCapture() {
+        startActivity(Intent(this, CaptureActivity::class.java).putExtra(CaptureActivity.EXTRA_PRESET_ID, selectedId))
+    }
+
+    private fun openDiagnostics() {
+        startActivity(Intent(this, DiagnosticsActivity::class.java))
+    }
+
+    /**
+     * Runs [action] once the camera permission is granted. Notifications are requested at the
+     * same time but are optional (the capture service works without them, just silently).
+     */
+    private fun withCameraPermission(requestCode: Int, action: () -> Unit) {
+        if (Ui.hasPermissions(this, arrayOf(android.Manifest.permission.CAMERA))) {
+            action(); return
+        }
+        requestPermissions(Ui.REQUIRED_PERMISSIONS, requestCode)
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (!Ui.hasPermissions(this, Ui.REQUIRED_PERMISSIONS)) {
-            status.text = getString(R.string.perm_needed); Ui.show(status, true)
-        } else if (requestCode == 2) {
-            startActivity(Intent(this, DiagnosticsActivity::class.java))
+        if (Ui.hasPermissions(this, arrayOf(android.Manifest.permission.CAMERA))) {
+            Ui.show(status, false)
+            when (requestCode) {
+                REQ_CAPTURE -> openCapture()
+                REQ_DIAG -> openDiagnostics()
+            }
+            return
         }
+        // Denied. If Android will not show the dialog again, send the user to the app settings.
+        val permanently = !shouldShowRequestPermissionRationale(android.Manifest.permission.CAMERA)
+        status.text = getString(R.string.perm_needed) + if (permanently) " Toca aquí para abrir los ajustes de la app y activar Cámara." else ""
+        Ui.show(status, true)
+        status.setOnClickListener {
+            startActivity(
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(android.net.Uri.fromParts("package", packageName, null))
+            )
+        }
+    }
+
+    private companion object {
+        const val REQ_CAPTURE = 1
+        const val REQ_DIAG = 2
     }
 
     private fun renderPresets() {

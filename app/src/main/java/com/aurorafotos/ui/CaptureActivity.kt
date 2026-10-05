@@ -167,7 +167,7 @@ class CaptureActivity : Activity() {
     // ---- session -------------------------------------------------------------------------
 
     private fun startSession() {
-        if (!Ui.hasPermissions(this, Ui.REQUIRED_PERMISSIONS)) {
+        if (!Ui.hasPermissions(this, arrayOf(android.Manifest.permission.CAMERA))) {
             requestPermissions(Ui.REQUIRED_PERMISSIONS, 1); return
         }
         stopFramingPreview()
