@@ -72,6 +72,9 @@ class CaptureEngine(private val context: Context) {
         val rolling = preset.stackMode == StackMode.LIGHTEN
         var rollingStack: StackResult? = null
         var lastResult: TotalCaptureResult? = null
+        // Video frames must not flicker: exposure gain and white balance are locked on the first shot.
+        var lockedGain: Double? = null
+        var lockedResult: TotalCaptureResult? = null
 
         val requestedExposure = if (preset.exposureNs == Preset.MAX_EXPOSURE) info.maxExposureNs else preset.exposureNs
         val iso = info.clampIso(preset.iso)
@@ -166,11 +169,16 @@ class CaptureEngine(private val context: Context) {
 
                 val shotStack = stacker.result()
                 val lr = lastResult
+                if (preset.makeVideo && lockedGain == null) {
+                    lockedGain = RawRender.autoGainFor(shotStack, cfa, if (preset.stackMode == StackMode.AVERAGE) shotStack.frames else 1)
+                    lockedResult = lr
+                    log.appendLine("Ganancia de render fijada para el video: ${String.format(java.util.Locale.US, "%.2f", lockedGain)}×")
+                }
                 if (rolling) {
                     val acc = rollingStack
                     if (acc == null) rollingStack = shotStack else acc.lightenInPlace(shotStack)
                     if (preset.makeVideo) {
-                        val bm = renderJpegBitmap(rollingStack!!, cfa, lr, StackMode.ADD, preset.videoHalfRes, orientation)
+                        val bm = renderJpegBitmap(rollingStack!!, cfa, lockedResult ?: lr, StackMode.ADD, preset.videoHalfRes, orientation, lockedGain)
                         videoUris += saver.saveJpeg("${sessionName}_trail_${Fmt.frameIndex(shotIdx)}.jpg", RawRender.jpeg(bm))
                         bm.recycle()
                     }
@@ -178,7 +186,9 @@ class CaptureEngine(private val context: Context) {
                     val base = if (preset.stackMode == StackMode.NONE) "${sessionName}_${Fmt.frameIndex(frameCounter)}" else "${sessionName}_shot${Fmt.frameIndex(shotIdx)}"
                     if (preset.saveRaw && lr != null) saveStackDng(saver, log, info, lr, shotStack, preset.stackMode, orientation, "$base.dng", preset.name)
                     if (preset.saveJpeg || preset.makeVideo) {
-                        val bm = renderJpegBitmap(shotStack, cfa, lr, preset.stackMode, preset.makeVideo && preset.videoHalfRes, orientation)
+                        // Timelapse frames use the locked gain/WB; single stills get their own auto level.
+                        val bm = if (preset.makeVideo) renderJpegBitmap(shotStack, cfa, lockedResult ?: lr, preset.stackMode, preset.videoHalfRes, orientation, lockedGain)
+                        else renderJpegBitmap(shotStack, cfa, lr, preset.stackMode, false, orientation, null)
                         val uri = saver.saveJpeg("$base.jpg", RawRender.jpeg(bm))
                         bm.recycle()
                         if (preset.makeVideo) videoUris += uri
@@ -193,7 +203,7 @@ class CaptureEngine(private val context: Context) {
                 if (acc != null && lr != null) {
                     if (preset.saveRaw) saveStackDng(saver, log, info, lr, acc, StackMode.LIGHTEN, orientation, "${sessionName}_startrails.dng", preset.name)
                     if (preset.saveJpeg) {
-                        val bm = renderJpegBitmap(acc, cfa, lr, StackMode.ADD, false, orientation)
+                        val bm = renderJpegBitmap(acc, cfa, lr, StackMode.ADD, false, orientation, null)
                         saver.saveJpeg("${sessionName}_startrails.jpg", RawRender.jpeg(bm))
                         bm.recycle()
                     }
@@ -221,9 +231,9 @@ class CaptureEngine(private val context: Context) {
         }
     }
 
-    private fun renderJpegBitmap(stack: StackResult, cfa: Int, result: TotalCaptureResult?, mode: StackMode, halfRes: Boolean, orientation: Int): Bitmap {
+    private fun renderJpegBitmap(stack: StackResult, cfa: Int, result: TotalCaptureResult?, mode: StackMode, halfRes: Boolean, orientation: Int, gain: Double?): Bitmap {
         val exposureFrames = if (mode == StackMode.AVERAGE) stack.frames else 1
-        val bm = RawRender.render(stack, cfa, result, exposureFrames, halfRes)
+        val bm = RawRender.render(stack, cfa, result, exposureFrames, halfRes, gainOverride = gain)
         return RawRender.rotated(bm, orientation)
     }
 

@@ -29,6 +29,12 @@ object RawRender {
      * before auto gain: 1 renders the stack as a long exposure (N× brighter than one frame),
      * [StackResult.frames] renders it like the average of its frames.
      */
+    /** Exposure gain the auto-level would pick for this stack (so a session can lock it). */
+    fun autoGainFor(stack: StackResult, cfa: Int, exposureFrames: Int, autoGainMax: Double = 8.0): Double {
+        val white = maxOf(1.0, exposureFrames.toDouble() * stack.rangePerFrame)
+        return RawDemosaic.autoGain(stack.signal, stack.width, stack.height, cfa, white, maxGain = autoGainMax)
+    }
+
     fun render(
         stack: StackResult,
         cfa: Int,
@@ -36,9 +42,11 @@ object RawRender {
         exposureFrames: Int,
         halfRes: Boolean,
         autoGainMax: Double = 8.0,
+        /** Fixed exposure gain (e.g. locked for a whole timelapse); null = auto per image. */
+        gainOverride: Double? = null,
     ): Bitmap {
         val white = maxOf(1.0, exposureFrames.toDouble() * stack.rangePerFrame)
-        val gain = RawDemosaic.autoGain(stack.signal, stack.width, stack.height, cfa, white, maxGain = autoGainMax)
+        val gain = gainOverride ?: RawDemosaic.autoGain(stack.signal, stack.width, stack.height, cfa, white, maxGain = autoGainMax)
         val params = RawDemosaic.Params(white = white, gains = gainsOf(result), colorMatrix = matrixOf(result), gain = gain)
         return if (halfRes) {
             val px = RawDemosaic.renderHalf(stack.signal, stack.width, stack.height, cfa, params)
