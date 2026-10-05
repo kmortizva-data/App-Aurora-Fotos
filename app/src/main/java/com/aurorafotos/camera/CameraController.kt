@@ -147,6 +147,67 @@ class CameraController(private val context: Context, val info: CameraInfo) {
         }
     }
 
+    /** Session with the encoder surface (and optional preview) as the only outputs. */
+    suspend fun configureVideo(encoderSurface: Surface, preview: Surface?) {
+        val dev = device ?: error("camera not open")
+        session?.close(); session = null
+        rawReader?.close(); rawReader = null
+        jpegReader?.close(); jpegReader = null
+        previewSurface = preview
+        val outputs = ArrayList<OutputConfiguration>()
+        outputs += OutputConfiguration(encoderSurface)
+        if (preview != null) outputs += OutputConfiguration(preview)
+        session = suspendCancellableCoroutine { cont ->
+            val config = SessionConfiguration(
+                SessionConfiguration.SESSION_REGULAR, outputs, executor,
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(s: CameraCaptureSession) {
+                        if (cont.isActive) cont.resume(s) else s.close()
+                    }
+
+                    override fun onConfigureFailed(s: CameraCaptureSession) {
+                        if (cont.isActive) cont.resumeWithException(IllegalStateException("No se pudo configurar la sesión de video"))
+                    }
+                })
+            dev.createCaptureSession(config)
+        }
+    }
+
+    /**
+     * Starts a manual-exposure recording: repeating TEMPLATE_RECORD requests to the encoder
+     * surface with the exact [frameDurationNs] (1/fps). Returns the exposure actually set.
+     */
+    fun startRecording(encoderSurface: Surface, p: ExposureParams, frameDurationNs: Long): Long {
+        val s = session ?: error("session not configured")
+        val b = s.device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+        b.addTarget(encoderSurface)
+        previewSurface?.let { b.addTarget(it) }
+        applyManual(b, p, forPreview = true)
+        val exp = if (p.clampToRange) info.clampExposure(p.exposureNs) else p.exposureNs
+        val frame = maxOf(frameDurationNs, exp)
+        b.set(CaptureRequest.SENSOR_FRAME_DURATION, frame)
+        b.set(CaptureRequest.CONTROL_CAPTURE_INTENT, CameraMetadata.CONTROL_CAPTURE_INTENT_VIDEO_RECORD)
+        b.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+        s.setRepeatingRequest(b.build(), null, handler)
+        return exp
+    }
+
+    /** Stops the repeating request and waits for in-flight frames to drain. */
+    suspend fun stopRecording() {
+        val s = session ?: return
+        suspendCancellableCoroutine<Unit> { cont ->
+            try {
+                s.stopRepeating()
+                // abortCaptures() would discard frames; waiting for the session to go idle is cleaner.
+                handler.postDelayed({ if (cont.isActive) cont.resume(Unit) }, 300)
+            } catch (t: Throwable) {
+                if (cont.isActive) cont.resume(Unit)
+            }
+        }
+        runCatching { s.close() }
+        session = null
+    }
+
     fun close() {
         closed = true
         runCatching { session?.close() }

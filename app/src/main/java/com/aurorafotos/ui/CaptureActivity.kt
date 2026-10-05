@@ -146,8 +146,13 @@ class CaptureActivity : Activity() {
                 )
                 val exp = if (preset.exposureNs == Preset.MAX_EXPOSURE) info.maxExposureNs else info.clampExposure(preset.exposureNs)
                 val frames = preset.effectiveFrames(exp)
-                status.text = "Exposición real por frame: ${Fmt.exposure(exp)} (máx. del dispositivo ${Fmt.exposure(info.maxExposureNs)}) · ISO ${info.clampIso(preset.iso)}\n" +
-                    "Cada toma: $frames frames ≈ ${Fmt.exposure(frames * exp)} de exposición"
+                status.text = if (preset.isVideo) {
+                    val size = info.pickVideoSize()
+                    "Video ${size.width}x${size.height} @ ${preset.videoFps} fps · ${Fmt.exposure(minOf(exp, 1_000_000_000L / preset.videoFps))} por frame · ISO ${info.clampIso(preset.iso)}"
+                } else {
+                    "Exposición real por frame: ${Fmt.exposure(exp)} (máx. del dispositivo ${Fmt.exposure(info.maxExposureNs)}) · ISO ${info.clampIso(preset.iso)}\n" +
+                        "Cada toma: $frames frames ≈ ${Fmt.exposure(frames * exp)} de exposición"
+                }
             } catch (t: Throwable) {
                 Log.e(tag, "preview failed", t)
                 status.text = getString(R.string.status_error, t.message)
@@ -199,9 +204,14 @@ class CaptureActivity : Activity() {
                 status.text = getString(R.string.status_countdown, p.countdown)
             }
             SessionState.CAPTURING -> {
-                bigStatus.text = if (p.totalShots > 0) "${p.shot}/${p.totalShots}" else "${p.shot}"
-                status.text = getString(R.string.status_running, p.shot, if (p.totalShots > 0) p.totalShots.toString() else "∞", p.frame) +
-                    "\n${Fmt.exposure(p.exposureNs)} · ISO ${p.iso} · ${Fmt.seconds(p.elapsedMs)}"
+                if (preset.isVideo) {
+                    bigStatus.text = "● REC"
+                    status.text = "Grabando ${Fmt.seconds(p.elapsedMs)} · ${p.frame} frames · ${p.message}\n${Fmt.exposure(p.exposureNs)} · ISO ${p.iso}"
+                } else {
+                    bigStatus.text = if (p.totalShots > 0) "${p.shot}/${p.totalShots}" else "${p.shot}"
+                    status.text = getString(R.string.status_running, p.shot, if (p.totalShots > 0) p.totalShots.toString() else "∞", p.frame) +
+                        "\n${Fmt.exposure(p.exposureNs)} · ISO ${p.iso} · ${Fmt.seconds(p.elapsedMs)}"
+                }
             }
             SessionState.PROCESSING -> {
                 bigStatus.text = "…"
@@ -231,6 +241,7 @@ class CaptureActivity : Activity() {
 
     private fun paramsLine(p: Preset): String {
         val exp = if (p.exposureNs == Preset.MAX_EXPOSURE) "exp. máx" else Fmt.exposure(p.exposureNs)
+        if (p.isVideo) return "VIDEO · ISO ${p.iso} · $exp · ${p.videoFps} fps · cámara ${p.cameraId} · foco ${p.focusDiopters} dpt"
         val frames = if (p.totalExposureNs > 0) "hasta ${Fmt.exposure(p.totalExposureNs)}" else "× ${p.framesPerShot}"
         return "ISO ${p.iso} · $exp $frames · ${p.stackMode.name.lowercase()} · cámara ${p.cameraId} · foco ${p.focusDiopters} dpt"
     }

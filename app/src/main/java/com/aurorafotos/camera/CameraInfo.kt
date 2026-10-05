@@ -45,6 +45,19 @@ class CameraInfo(val id: String, val characteristics: CameraCharacteristics) {
     val jpegSizes: List<Size> = map?.getOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
     val previewSizes: List<Size> = map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)?.toList() ?: emptyList()
 
+    val videoSizes: List<Size> = map?.getOutputSizes(android.media.MediaCodec::class.java)?.toList() ?: emptyList()
+
+    /** Largest 16:9 size up to 4K UHD that the encoder path offers (falls back to the largest size). */
+    fun pickVideoSize(): Size {
+        val pairs = videoSizes.map { it.width to it.height }
+        val (w, h) = pickVideoSize(pairs)
+        return Size(w, h)
+    }
+
+    /** Minimum frame duration (ns) the camera supports for a video size, or 0 if unknown. */
+    fun minFrameDurationNs(size: Size): Long =
+        runCatching { map?.getOutputMinFrameDuration(android.media.MediaCodec::class.java, size) ?: 0L }.getOrDefault(0L)
+
     val largestRaw: Size? = rawSizes.maxByOrNull { it.width.toLong() * it.height }
     val largestJpeg: Size? = jpegSizes.maxByOrNull { it.width.toLong() * it.height }
 
@@ -81,6 +94,15 @@ class CameraInfo(val id: String, val characteristics: CameraCharacteristics) {
             return cm.cameraIdList.mapNotNull { id ->
                 runCatching { CameraInfo(id, cm.getCameraCharacteristics(id)) }.getOrNull()
             }
+        }
+
+        /** Pure version of [pickVideoSize] for tests: (width, height) pairs. */
+        fun pickVideoSize(sizes: List<Pair<Int, Int>>): Pair<Int, Int> {
+            val wide = sizes.filter { (w, h) -> Math.abs(w * 9 - h * 16) < 16 && w <= 3840 && h <= 2160 }
+            return wide.maxByOrNull { (w, h) -> w.toLong() * h }
+                ?: sizes.filter { (w, h) -> w <= 3840 && h <= 2160 }.maxByOrNull { (w, h) -> w.toLong() * h }
+                ?: sizes.maxByOrNull { (w, h) -> w.toLong() * h }
+                ?: (1920 to 1080)
         }
 
         /** Nearest Camera2 AWB preset for a colour temperature (0 = auto). */

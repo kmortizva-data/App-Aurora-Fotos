@@ -80,6 +80,9 @@ class SettingsActivity : Activity() {
 
     private fun build() {
         val p = preset
+        if (p.isVideo) form.addView(Ui.label(this, "Preset de VIDEO: se usan ISO, exposición por frame (no puede superar 1/fps), FPS, duración, WB, foco, lente y cuenta atrás. Los campos de apilado no aplican.", size = 13f).apply {
+            setTextColor(getColor(R.color.accent)); setPadding(0, 0, 0, Ui.dp(this@SettingsActivity, 8))
+        })
         iso = field("ISO", p.iso.toString(), help = "El S24 Ultra suele exponer 50–3200 a terceros; se recorta al rango real.")
         exposure = field("Exposición por frame (s)", if (p.exposureNs == Preset.MAX_EXPOSURE) "max" else fmt(p.exposureNs / 1e9), numeric = false,
             help = "Escribe \"max\" para usar la máxima que el teléfono declara a apps de terceros (1/9 s en el S24 Ultra).")

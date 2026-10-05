@@ -160,6 +160,10 @@ class MainActivity : Activity() {
 
     private fun summary(p: Preset): String {
         val exp = if (p.exposureNs == Preset.MAX_EXPOSURE) "exp. máx" else Fmt.exposure(p.exposureNs)
+        if (p.isVideo) {
+            val dur = if (p.durationMs > 0) Fmt.seconds(p.durationMs) else "hasta detener"
+            return "VIDEO · ISO ${p.iso} · $exp · ${p.videoFps} fps · $dur → MP4 4K"
+        }
         val frames = if (p.totalExposureNs > 0) "≈${Fmt.exposure(p.totalExposureNs)} totales por toma" else "${p.framesPerShot} frame(s)/toma"
         val b = StringBuilder("ISO ${p.iso} · $exp · $frames")
         if (p.stackMode.name != "NONE") b.append(" · ${p.stackMode.name.lowercase()}")

@@ -3,6 +3,8 @@ package com.aurorafotos.presets
 
 enum class StackMode { NONE, AVERAGE, ADD, LIGHTEN }
 
+enum class PresetKind { PHOTO, VIDEO }
+
 /**
  * Everything the capture engine needs to run a session unattended.
  *
@@ -49,7 +51,11 @@ data class Preset(
     val forceExposure: Boolean = false,
     /** Render video frames at half resolution (4× faster; 1080p output). */
     val videoHalfRes: Boolean = false,
+    /** PHOTO = stacked stills / timelapse; VIDEO = real-time manual recording at [videoFps]. */
+    val kind: PresetKind = PresetKind.PHOTO,
 ) {
+    val isVideo: Boolean get() = kind == PresetKind.VIDEO
+
     val isTimelapse: Boolean get() = intervalMs > 0 || totalShots != 1
 
     /** Frames to capture per shot given the per-frame exposure the device actually applies. */
@@ -69,7 +75,7 @@ data class Preset(
         kv("totalShots", totalShots); kv("saveRaw", saveRaw); kv("saveJpeg", saveJpeg)
         kv("makeVideo", makeVideo); kv("videoFps", videoFps); kv("focusDiopters", focusDiopters)
         kv("wbKelvin", wbKelvin); kv("cameraId", cameraId); kv("countdownSec", countdownSec)
-        kv("forceExposure", forceExposure); kv("videoHalfRes", videoHalfRes)
+        kv("forceExposure", forceExposure); kv("videoHalfRes", videoHalfRes); kv("kind", kind.name)
     }
 
     companion object {
@@ -111,6 +117,7 @@ data class Preset(
                 countdownSec = int("countdownSec", fallback.countdownSec),
                 forceExposure = bool("forceExposure", fallback.forceExposure),
                 videoHalfRes = bool("videoHalfRes", fallback.videoHalfRes),
+                kind = m["kind"]?.let { v -> PresetKind.values().firstOrNull { it.name == v } } ?: fallback.kind,
             )
         }
     }
@@ -178,8 +185,30 @@ object Presets {
         videoHalfRes = true,
     )
 
+    val AURORA_VIDEO = Preset(
+        id = "aurora_video",
+        name = "Aurora · video 24 fps",
+        description = "Video 4K real a 24 fps con los parámetros manuales del Pro Video: 1/24 s, ISO 3200, WB fijo, foco a infinito. 10 min o hasta detener.",
+        iso = 3200, exposureNs = 41_666_667L, framesPerShot = 1, totalExposureNs = 0, stackMode = StackMode.NONE,
+        intervalMs = 0, durationMs = 10 * 60_000L, totalShots = 0,
+        saveRaw = false, saveJpeg = false, makeVideo = true, videoFps = 24,
+        focusDiopters = 0f, wbKelvin = 3800, cameraId = "0", countdownSec = 3,
+        kind = PresetKind.VIDEO,
+    )
+
+    val AURORA_VIDEO_SLOW = Preset(
+        id = "aurora_video_slow",
+        name = "Aurora · video lento 9 fps",
+        description = "Obturador lento: 1/9 s por frame (el máximo que deja Samsung), 9 fps reales, 2.7× más luz que a 24 fps. Ideal para auroras tenues; se reproduce a 9 fps.",
+        iso = 3200, exposureNs = Preset.MAX_EXPOSURE, framesPerShot = 1, totalExposureNs = 0, stackMode = StackMode.NONE,
+        intervalMs = 0, durationMs = 10 * 60_000L, totalShots = 0,
+        saveRaw = false, saveJpeg = false, makeVideo = true, videoFps = 9,
+        focusDiopters = 0f, wbKelvin = 3800, cameraId = "0", countdownSec = 3,
+        kind = PresetKind.VIDEO,
+    )
+
     val ALL: List<Preset> = listOf(
-        AURORA_PHOTO, AURORA_TIMELAPSE, LONG_EXPOSURE, LONG_EXPOSURE_TIMELAPSE, MILKY_WAY, STAR_TRAILS
+        AURORA_PHOTO, AURORA_TIMELAPSE, AURORA_VIDEO, AURORA_VIDEO_SLOW, LONG_EXPOSURE, LONG_EXPOSURE_TIMELAPSE, MILKY_WAY, STAR_TRAILS
     )
 
     fun byId(id: String): Preset = ALL.first { it.id == id }

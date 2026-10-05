@@ -10,6 +10,8 @@ Presets incluidos:
 |---|---|---|
 | Aurora · foto | frames sumados a ISO 1600 hasta 8 s equivalentes | DNG 16 bit + JPEG |
 | Aurora · timelapse | cada 4 s una toma de 2 s equivalentes, 30 min | JPEG por toma + MP4 4K 24 fps |
+| Aurora · video 24 fps | video real 4K: 1/24 s, ISO 3200, WB fijo, foco ∞ (lo que se configura a mano en Pro Video) | MP4 4K HEVC |
+| Aurora · video lento 9 fps | obturador lento 1/9 s por frame (máximo de Samsung), 2.7× más luz | MP4 4K a 9 fps |
 | Exposición larga | frames sumados a ISO 800 hasta 30 s equivalentes | DNG 16 bit + JPEG |
 | Exposición larga · timelapse | 10 s equivalentes cada 20 s durante 30 min | JPEG + MP4 4K |
 | Vía Láctea / estrellas | frames sumados a ISO 3200 hasta 30 s equivalentes | DNG 16 bit + JPEG |
@@ -81,7 +83,7 @@ app/src/main/java/com/aurorafotos/
   capture/    CaptureEngine (sesión: cuenta atrás, tomas, apilado, video), CaptureService (FGS cámara)
   presets/    Preset, Presets (los 6), PresetStore (overrides del usuario)
   stacking/   RawStacker (sumas Bayer 32 bit), DngWriter + DngPatcher (DNG 16 bit), RawDemosaic/RawRender
-  video/      TimelapseEncoder (MediaCodec HEVC/AVC + MediaMuxer, 4K)
+  video/      TimelapseEncoder (frames → MP4), VideoEncoder (grabación en tiempo real)
   storage/    MediaSaver (MediaStore → DCIM/AuroraFotos)
   ui/         MainActivity, CaptureActivity (encuadre + progreso), SettingsActivity
   diag/       DiagnosticsActivity

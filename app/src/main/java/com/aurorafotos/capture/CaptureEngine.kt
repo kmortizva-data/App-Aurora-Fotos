@@ -22,6 +22,7 @@ import com.aurorafotos.stacking.StackResult
 import com.aurorafotos.storage.MediaSaver
 import com.aurorafotos.util.Fmt
 import com.aurorafotos.video.TimelapseEncoder
+import com.aurorafotos.video.VideoEncoder
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -59,6 +60,96 @@ class CaptureEngine(private val context: Context) {
 
     /** [deviceRotation] is Surface.ROTATION_* at start, used for JPEG/DNG orientation. */
     suspend fun run(preset: Preset, deviceRotation: Int) = withContext(Dispatchers.Default) {
+        if (preset.isVideo) runVideo(preset, deviceRotation) else runPhoto(preset, deviceRotation)
+    }
+
+    /** Manual real-time recording: the camera feeds the encoder surface directly. */
+    private suspend fun runVideo(preset: Preset, deviceRotation: Int) {
+        stopRequested = false
+        val sessionName = "${Fmt.sessionStamp()}_${preset.id}"
+        update { SessionProgress(state = SessionState.COUNTDOWN, presetName = preset.name, sessionName = sessionName, countdown = preset.countdownSec) }
+        val info = CameraInfo.load(context, preset.cameraId)
+        val controller = CameraController(context, info)
+        val saver = MediaSaver(context, sessionName)
+        val startedAt = SystemClock.elapsedRealtime()
+        val log = StringBuilder()
+        var encoder: VideoEncoder? = null
+        var videoUri: Uri? = null
+        var pfd: android.os.ParcelFileDescriptor? = null
+        var ok = false
+        try {
+            val size = info.pickVideoSize()
+            val fps = preset.videoFps.coerceIn(1, 60)
+            val frameDuration = 1_000_000_000L / fps
+            val requested = if (preset.exposureNs == Preset.MAX_EXPOSURE) minOf(info.maxExposureNs, frameDuration) else preset.exposureNs
+            val iso = info.clampIso(preset.iso)
+            val orientation = jpegOrientation(info, deviceRotation)
+            val minFrame = info.minFrameDurationNs(size)
+            log.appendLine("Aurora Fotos · video $sessionName")
+            log.appendLine("Dispositivo: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})")
+            log.appendLine("Preset: ${preset.name} [${preset.id}] · ${size.width}x${size.height} @ $fps fps (frame ${frameDuration} ns, mín. cámara $minFrame ns)")
+            log.appendLine("ISO $iso · exposición pedida ${Fmt.exposure(requested)} (máx. declarado ${Fmt.exposure(info.maxExposureNs)}) · WB ${preset.wbKelvin} K · foco ${preset.focusDiopters} dpt · orientación $orientation°")
+
+            for (sec in preset.countdownSec downTo 1) {
+                if (stopRequested) throw StopException()
+                update { it.copy(state = SessionState.COUNTDOWN, countdown = sec) }
+                delay(1000)
+            }
+
+            val bitrate = VideoEncoder.bitrateFor(size.width, size.height, fps)
+            val enc = VideoEncoder(size.width, size.height, fps, bitrate, orientation)
+            encoder = enc
+            val (uri, fd) = saver.openVideo("${sessionName}_${fps}fps.mp4")
+            videoUri = uri; pfd = fd
+            enc.start(fd.fileDescriptor)
+
+            controller.open()
+            controller.configureVideo(enc.inputSurface, null)
+            val params = ExposureParams(
+                iso = iso, exposureNs = requested, focusDiopters = preset.focusDiopters,
+                awbMode = CameraInfo.awbModeForKelvin(preset.wbKelvin, info.awbModes),
+                clampToRange = !preset.forceExposure, noiseReductionOff = false,
+            )
+            val applied = controller.startRecording(enc.inputSurface, params, frameDuration)
+            log.appendLine("Grabando con exposición ${Fmt.exposure(applied)} · ${enc.mime} · ${bitrate / 1_000_000} Mbps")
+            update { it.copy(state = SessionState.CAPTURING, exposureNs = applied, iso = iso, framesPerShot = 0, totalShots = 0, shot = 1) }
+
+            val recStart = SystemClock.elapsedRealtime()
+            while (true) {
+                coroutineContext.ensureActive()
+                if (stopRequested) break
+                val elapsed = SystemClock.elapsedRealtime() - recStart
+                if (preset.durationMs > 0 && elapsed >= preset.durationMs) break
+                val frames = enc.framesEncoded.get().toInt()
+                update { it.copy(frame = frames, elapsedMs = elapsed, message = "${size.width}x${size.height} · $fps fps") }
+                delay(500)
+            }
+            update { it.copy(state = SessionState.PROCESSING, message = "Cerrando video…") }
+            controller.stopRecording()
+            controller.close()
+            enc.stop()
+            ok = true
+            val frames = enc.framesEncoded.get()
+            val dur = SystemClock.elapsedRealtime() - recStart
+            val summary = "$frames frames en ${Fmt.seconds(dur)} (${String.format(java.util.Locale.US, "%.1f", frames * 1000.0 / maxOf(1L, dur))} fps reales) · ${Fmt.exposure(applied)} ISO $iso · ${size.width}x${size.height}"
+            log.appendLine("Resumen: $summary")
+            runCatching { saver.saveText("${sessionName}_info.txt", log.toString()) }
+            update { it.copy(state = SessionState.DONE, elapsedMs = SystemClock.elapsedRealtime() - startedAt, message = summary) }
+        } catch (e: StopException) {
+            update { it.copy(state = SessionState.DONE, message = "Detenido antes de empezar") }
+        } catch (t: Throwable) {
+            Log.e(tag, "video session failed", t)
+            runCatching { saver.saveText("${sessionName}_error.txt", log.toString() + "\n" + Log.getStackTraceString(t)) }
+            update { it.copy(state = SessionState.ERROR, error = t.message ?: t.toString()) }
+        } finally {
+            runCatching { controller.close() }
+            if (!ok) runCatching { encoder?.stop() }
+            runCatching { pfd?.close() }
+            videoUri?.let { saver.finishVideo(it, ok) }
+        }
+    }
+
+    private suspend fun runPhoto(preset: Preset, deviceRotation: Int) {
         stopRequested = false
         val sessionName = "${Fmt.sessionStamp()}_${preset.id}"
         update { SessionProgress(state = SessionState.COUNTDOWN, presetName = preset.name, sessionName = sessionName, countdown = preset.countdownSec) }
